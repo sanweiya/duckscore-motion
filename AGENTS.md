@@ -51,7 +51,7 @@ npm run typecheck          # tsc --noEmit
 - **logo 是静态文件**：放在 `brand/`（`favicon.svg` 精简版、`favicon-32.png` 兜底、`apple-touch-icon.png` 不透明 180、`icon-512.png`、`logo.svg` 完整插画），`scripts/build.mjs` 整目录拷到 `dist/brand/`，`index.html` 用相对路径引用（Pages 子路径下同样有效）。换图标 = 覆盖同名文件后重新构建，不用改代码；生成方法与绘图要求见 `brand/README.md`。
 - 若之后要放词标/页内标记，优先放空状态 `.gsp-empty-icon` 或工作台顶栏 `.gsp-vs-top`，尺寸与主色参考 `--gsp-accent`（#436d9d）；深色主题（`.gsp-root.is-studio` 与黑底画布）需要能看清。
 - 任何 logo 都不能遮挡或替换 alphaTab 的「♪ alphaTab.net」署名（见下）。
-- **命名**：显示名 **Duck Score Motion**（`index.html` 的 `<title>` 就是这四个词，说明放 `<meta name="description">`），仓库 `duckscore-motion`，地址 `https://sanweiya.github.io/duckscore-motion/`。对外文案已统一；**内部标识不改**：`gp-score-player.*` 三个 localStorage key、`[gp-studio]` 日志前缀、`gsp-` CSS 前缀、`plugins/gp-score-player/` 兜底路径——改 key 会丢用户设置。
+- **命名**：显示名 **Duck Score Motion**（`index.html` 的 `<title>` 就是这四个词，说明放 `<meta name="description">`），仓库 `duckscore-motion`，部署在仓库的 Pages（地址即 `<owner>.github.io/<repo>/`，**不要在 README 等公开文档里写出来**）。对外文案已统一；**内部标识不改**：`gp-score-player.*` 三个 localStorage key、`[gp-studio]` 日志前缀、`gsp-` CSS 前缀、`plugins/gp-score-player/` 兜底路径——改 key 会丢用户设置。
 
 ## 打包 Electron（未做）
 
