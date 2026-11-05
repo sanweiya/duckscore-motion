@@ -25,6 +25,20 @@ export interface VideoBeatBounds {
   /** Vertical span of the current staff system. */
   systemTop: number;
   systemH: number;
+  /**
+   * X position of the rightmost staff line of the system this beat belongs to
+   * (the closing barline of the last bar on that line). The playhead decelerates
+   * towards it when the line runs out of notes; undefined if the closing line
+   * could not be measured.
+   */
+  lineEnd?: number;
+}
+
+export interface VideoSystem {
+  /** Top of this staff system's rendered partial, in score surface coordinates. */
+  top: number;
+  /** Bottom of that partial (where the next line starts). */
+  bottom: number;
 }
 
 export interface VideoScore {
@@ -32,6 +46,13 @@ export interface VideoScore {
   width: number;
   height: number;
   beats: Map<string, VideoBeatBounds>;
+  /**
+   * One band per staff system, in surface order. A page layout paints one SVG
+   * partial per system, so these are exactly the regions a single-line view
+   * shows: everything outside the active band belongs to another line. Bands
+   * that hold no staff (page captions, tuning info) are excluded.
+   */
+  systems: VideoSystem[];
   title: string;
   subtitle: string;
   artist: string;
@@ -60,8 +81,12 @@ export interface VideoScoreOptions {
   barWidths?: Record<number, number>;
   /** alphaTab display scale. It changes wrapping/density before the surface is fitted to the frame. */
   scale?: number;
-  /** Vertical page and parchment are the natural video layouts; horizontal is supported too. */
-  layoutMode?: 'page' | 'horizontal' | 'parchment';
+  /**
+   * Page is the natural video layout; horizontal is fitted by height and
+   * panned. `pageLine` uses the identical page surface and is only differentiated
+   * by the camera/clip in `layoutVideoCanvas`.
+   */
+  layoutMode?: 'page' | 'pageLine' | 'horizontal';
   voice2: number;
   fonts: Partial<Record<FontKey, FontOverride>>;
   colors: ScoreColors;
@@ -83,6 +108,12 @@ export interface VideoLayoutOptions {
   showMargins: boolean;
   /** Horizontal scores are fitted by height and panned with a horizontal camera. */
   horizontal?: boolean;
+  /**
+   * Page layout that shows one staff system at a time: the surface is laid out
+   * exactly like a page, but only the active line is visible and the view jumps
+   * to the next line without any scrolling animation.
+   */
+  singleLine?: boolean;
   /** Camera zoom for horizontal scores (0.25-2). */
   zoom?: number;
   /** Surface theme: light paper with dark notation, or the inverse. */
@@ -155,6 +186,14 @@ export interface CursorFrame {
 }
 
 const SCORE_SURFACE_WIDTH = 1760;
+/** Transparent gutter around every rasterized partial (see the tile builder). */
+const TILE_PADDING = 48;
+/**
+ * Width of a page-layout surface: the layout host plus the transparent gutter
+ * on both sides. Both single-line framings derive their base scale from this,
+ * so the same Zoom value shows the staff at the same size in each.
+ */
+const PAGE_SURFACE_WIDTH = SCORE_SURFACE_WIDTH + TILE_PADDING * 2;
 
 let fontCssPromise: Promise<string> | null = null;
 
@@ -282,9 +321,7 @@ export async function renderVideoScore(
 
   const layoutMode = options.layoutMode === 'horizontal'
     ? alphaTab.LayoutMode.Horizontal
-    : options.layoutMode === 'parchment'
-      ? alphaTab.LayoutMode.Parchment
-      : alphaTab.LayoutMode.Page;
+    : alphaTab.LayoutMode.Page;
   const settings: any = {
     core: {
       scriptFile: options.scriptFile,
@@ -454,12 +491,17 @@ export async function renderVideoScore(
       // Centered SMuFL glyphs (clef, time signature, rests) extend to the left
       // of their anchor. Give every tile a transparent gutter so those paths
       // are not clipped by the SVG viewport.
-      const pad = 48;
       const image = await svgToImage(
-        scaleSvgResolution(padSvg(serialized, pad), options.layoutMode === 'horizontal' ? 2 : 1),
+        scaleSvgResolution(padSvg(serialized, TILE_PADDING), options.layoutMode === 'horizontal' ? 2 : 1),
         fontCss,
       );
-      tiles.push({ image, x: x - pad, y: y - pad, w: w + pad * 2, h: h + pad * 2 });
+      tiles.push({
+        image,
+        x: x - TILE_PADDING,
+        y: y - TILE_PADDING,
+        w: w + TILE_PADDING * 2,
+        h: h + TILE_PADDING * 2,
+      });
     }
     if (tiles.length === 0) throw new Error('乐谱没有可渲染的内容');
 
@@ -484,6 +526,30 @@ export async function renderVideoScore(
     if (!score) throw new Error('乐谱数据为空');
     const track = score.tracks.find((candidate: any) => candidate.index === options.trackIndex) ?? score.tracks[0];
     const boundsLookup = api.boundsLookup;
+    // Where each staff system ends horizontally. Staff lines of a system are
+    // painted from the first bar to the closing barline of the last bar, so the
+    // maximum right edge of the system's master bars is exactly the vertical
+    // line the playhead should stop at. Cached per system because the lookup is
+    // queried once per beat.
+    const systemLineEnds = new Map<any, number | null>();
+    const lineEndOf = (masterBarBounds: any): number | null => {
+      const staffSystem = masterBarBounds?.staffSystemBounds;
+      if (!staffSystem) return null;
+      if (systemLineEnds.has(staffSystem)) return systemLineEnds.get(staffSystem) ?? null;
+      let right = Number.NEGATIVE_INFINITY;
+      for (const barBounds of staffSystem.bars ?? []) {
+        const aligned = barBounds?.lineAlignedBounds;
+        const box = aligned && aligned.w > 0
+          ? aligned
+          : barBounds?.realBounds ?? barBounds?.visualBounds;
+        if (box && Number.isFinite(box.x) && Number.isFinite(box.w)) {
+          right = Math.max(right, box.x + box.w);
+        }
+      }
+      const measured = Number.isFinite(right) ? right : null;
+      systemLineEnds.set(staffSystem, measured);
+      return measured;
+    };
     if (track && boundsLookup) {
       for (const staff of track.staves) {
         for (const bar of staff.bars) {
@@ -501,16 +567,34 @@ export async function renderVideoScore(
               const system = lineAligned && lineAligned.h > 0
                 ? lineAligned
                 : masterBarBounds.visualBounds;
+              const lineEnd = lineEndOf(masterBarBounds);
               beats.set(beatKey(beat), {
                 x: beatBounds.onNotesX + offsetX,
                 systemTop: system.y + offsetY,
                 systemH: system.h,
+                lineEnd: lineEnd === null ? undefined : lineEnd + offsetX,
               });
             }
           }
         }
       }
     }
+
+    // One band per staff system: the partial that contains that system's staff
+    // lines. Partials without any staff (e.g. the tuning caption above the page)
+    // are page furniture, not lines, and must never become a view target.
+    const bands = tiles
+      .map((tile) => ({ top: tile.y + TILE_PADDING, bottom: tile.y + tile.h - TILE_PADDING }))
+      .filter((band) => band.bottom - band.top > 1)
+      .sort((a, b) => a.top - b.top);
+    const staffTops = [...new Set([...beats.values()].map((bounds) => bounds.systemTop))]
+      .sort((a, b) => a - b);
+    const systems: VideoSystem[] = [];
+    for (const staffTop of staffTops) {
+      const band = bands.find((candidate) => staffTop >= candidate.top - 2 && staffTop <= candidate.bottom + 2);
+      if (band && !systems.includes(band)) systems.push(band);
+    }
+    if (systems.length === 0) systems.push(...bands);
 
     const [creditBadge, creditBadgeDark] = await Promise.all([
       loadPoweredByBadge(false),
@@ -521,6 +605,7 @@ export async function renderVideoScore(
       width,
       height,
       beats,
+      systems,
       title: options.title || score.title || '',
       subtitle: score.subTitle || '',
       artist: options.artist || score.artist || '',
@@ -654,6 +739,8 @@ export interface VideoCanvasLayout {
   showHeader: boolean;
   showMargins: boolean;
   horizontal: boolean;
+  /** Page layout restricted to one staff system at a time. */
+  singleLine: boolean;
   theme: VideoTheme;
 }
 
@@ -666,7 +753,10 @@ export function layoutVideoCanvas(
   const showHeader = options.showHeader !== false;
   const showMargins = options.showMargins !== false;
   const horizontal = options.horizontal === true;
-  const zoom = horizontal ? Math.min(2, Math.max(0.1, options.zoom ?? 1)) : 1;
+  // Single-line is a page variant, never combined with the horizontal camera.
+  const singleLine = !horizontal && options.singleLine === true;
+  // Both single-line framings fit the line by height and zoom with the camera.
+  const zoom = horizontal ? Math.min(4, Math.max(0.1, options.zoom ?? 1)) : 1;
   const marginX = showMargins ? Math.round(width * 0.052) : 0;
   const headerH = showHeader ? Math.round(height * 0.145) : 0;
   // Without a header the paper still needs a top margin; with a header the
@@ -676,18 +766,20 @@ export function layoutVideoCanvas(
   // equal to the left/right page margin.
   const scoreH = height - scoreTop - (showMargins ? marginX : 0) + 2;
   const scoreW = width - marginX * 2;
-  // Horizontal layout is one very wide surface. Fitting its width would make
-  // the notation microscopic, so fit its height instead and pan horizontally.
-  // Center the horizontal staff in a readable band instead of stretching it
-  // to the exact paper height. The factor is relative to the frame, so preview
-  // and export keep the same composition.
-  const scale = horizontal
-    ? (scoreH / Math.max(1, score.height)) * 0.5 * zoom
-    : scoreW / score.width;
+  // One base scale for both single-line framings, so the same Zoom value shows
+  // the staff at the same size in each:
+  // - horizontal fits the page width once and the camera zoom magnifies it;
+  // - the single-line page keeps the page's width fit and grows by rendering
+  //   the score at a larger alphaTab scale, which makes each line hold fewer
+  //   bars (down to one) so the whole line still fits inside the canvas.
+  // Page mode itself never zooms the camera.
+  const pageFit = scoreW / score.width;
+  const baseScale = scoreW / PAGE_SURFACE_WIDTH;
+  const scale = horizontal ? baseScale * zoom : pageFit;
   const insetX = showMargins ? marginX : Math.max(16, Math.round(width * 0.03));
   return {
     width, height, headerH, marginX, insetX, scoreTop, scoreH, scoreW, scale,
-    showHeader, showMargins, horizontal,
+    showHeader, showMargins, horizontal, singleLine,
     theme: options.theme === 'dark' ? 'dark' : 'light',
   };
 }
@@ -827,6 +919,12 @@ export interface PaintFrame {
   /** Horizontal camera offset for Horizontal layout. */
   scrollX?: number;
   cursor: CursorFrame | null;
+  /**
+   * Staff system to frame when the playhead is momentarily gone (end of the
+   * score): the single-line view keeps showing the line it was on instead of
+   * jumping to an unrelated area of the surface.
+   */
+  systemTop?: number;
   accent: string;
   trackLabel: string;
   cursorStyle?: CursorStyle;
@@ -839,7 +937,7 @@ export function paintVideoFrame(
   layout: VideoCanvasLayout,
   frame: PaintFrame,
 ): void {
-  const { width, height, headerH, marginX, insetX, scoreTop, scoreH, scoreW, scale, showHeader, showMargins, horizontal } = layout;
+  const { width, height, headerH, marginX, insetX, scoreTop, scoreH, scoreW, scale, showHeader, showMargins, horizontal, singleLine } = layout;
   const accent = frame.accent || '#436d9d';
   const dark = layout.theme === 'dark';
   // Surface palette. Only the surface and its text change with the theme; the
@@ -980,6 +1078,32 @@ export function paintVideoFrame(
     ? scoreTop + Math.max(0, (scoreH - contentH) / 2) - frame.scrollY
     : scoreTop - frame.scrollY;
 
+  let bandClipped = false;
+  if (singleLine) {
+    // Show one staff system: clip the score to its rendered partial so the
+    // neighbouring lines (and their text) are not visible. The camera already
+    // placed the band at a fixed screen position, so switching lines is a plain
+    // cut with no scrolling between them. Only the tiles are clipped: the
+    // playhead keeps its usual overshoot into the empty paper above/below.
+    // Without a cursor (the very end of the score) the caller passes the line
+    // that was last shown, so the clip cannot fall back to a caption partial.
+    const bandSystemTop = frame.systemTop !== undefined
+      ? frame.systemTop
+      : frame.cursor
+        ? frame.cursor.bounds.systemTop
+        : null;
+    const band = systemBand(score, bandSystemTop);
+    if (band) {
+      const bandTop = drawY + band.top * scale;
+      const bandBottom = drawY + band.bottom * scale;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, bandTop, width, Math.max(1, bandBottom - bandTop));
+      ctx.clip();
+      bandClipped = true;
+    }
+  }
+
   for (const tile of score.tiles) {
     const x = drawX + tile.x * scale;
     const y = drawY + tile.y * scale;
@@ -989,6 +1113,8 @@ export function paintVideoFrame(
     if (horizontal && (x + w < marginX - 8 || x > marginX + scoreW + 8)) continue;
     ctx.drawImage(tile.image, x, y, w, h);
   }
+
+  if (bandClipped) ctx.restore();
 
   if (frame.cursor) {
     const { bounds, x } = frame.cursor;
@@ -1083,7 +1209,42 @@ export function paintVideoFrame(
   }
 }
 
-/** Compute the interpolated playhead for the current tick. */
+/**
+ * Speed at the closing barline, relative to the note cadence. The playhead
+ * leaves the last note at exactly the cadence (it never speeds up) and keeps
+ * easing down until the line switches, so the line end is a plain slow-down:
+ * no kick at the last note, no brake, no stop. It is still gliding when the
+ * next line begins.
+ *
+ * With a constant deceleration the glide covers `(1 + this) / 2` of the gap to
+ * the closing barline, so a lower value slows the line end down more but stops
+ * a little further from the right edge.
+ */
+const LINE_END_END_SPEED = 0.6;
+
+/**
+ * Position curve for the end-of-line glide, as a fraction of the gap to the
+ * closing barline: one constant deceleration from the note cadence to
+ * `LINE_END_END_SPEED`, spread over the whole beat. The speed at the last note
+ * is exactly the speed the playhead already had between notes, so there is no
+ * visible switch in pace, only a gradual slow-down.
+ */
+function lineEndEase(progress: number): number {
+  const p = clamp01(progress);
+  return p - ((1 - LINE_END_END_SPEED) / 2) * p * p;
+}
+
+/**
+ * Compute the interpolated playhead for the current tick.
+ *
+ * Within one staff system the playhead glides linearly towards the next note.
+ * When the line runs out of notes (the next beat belongs to another staff
+ * system, or the score ends) there is nothing to interpolate to, so the
+ * playhead keeps moving towards the closing barline while gradually slowing
+ * down. The switch to the next line still happens at the exact tick where its
+ * first note starts: at that moment the tick lookup returns the new beat and
+ * its bounds point at the new system.
+ */
 export function cursorFor(
   api: AlphaTabApi,
   beats: Map<string, VideoBeatBounds>,
@@ -1101,15 +1262,56 @@ export function cursorFor(
   const rawProgress = lookup.tickDuration > 0 ? (tick - lookup.start) / lookup.tickDuration : 0;
   const progress = Math.min(1, Math.max(0, rawProgress));
   let x = bounds.x;
-  // Glide only inside one staff system; crossing a system break should jump.
+  // Inside one staff system the playhead glides to the next note. At the end of
+  // a line there is no next note on this line, so it keeps moving towards the
+  // closing barline while slowing down, and switches lines with the next tick.
   if (nextBounds && Math.abs(nextBounds.systemTop - bounds.systemTop) < 1) {
     x = bounds.x + (nextBounds.x - bounds.x) * progress;
+  } else if (bounds.lineEnd !== undefined && bounds.lineEnd > bounds.x) {
+    // Paced by the beat itself (distance over beat length), so the slow-down
+    // keeps the same relative timing at any tempo.
+    const distance = bounds.lineEnd - bounds.x;
+    x = bounds.x + distance * lineEndEase(progress);
   }
   return { bounds, next: nextBounds, progress, x };
 }
 
+/**
+ * The staff system band that contains `systemTop` (the staff lines top of the
+ * playhead). Single-line layouts show exactly this band.
+ */
+export function systemBand(score: VideoScore, systemTop: number | null): VideoSystem | null {
+  const systems = score.systems;
+  if (!systems || systems.length === 0) return null;
+  if (systemTop === null || !Number.isFinite(systemTop)) return systems[0];
+  for (const system of systems) {
+    if (systemTop >= system.top - 1 && systemTop <= system.bottom + 1) return system;
+  }
+  // Bounds built from a restored lookup can be a little off; fall back to the
+  // closest line rather than showing nothing.
+  let nearest = systems[0];
+  let best = Infinity;
+  for (const system of systems) {
+    const distance = Math.min(Math.abs(system.top - systemTop), Math.abs(system.bottom - systemTop));
+    if (distance < best) {
+      best = distance;
+      nearest = system;
+    }
+  }
+  return nearest;
+}
+
 export function scrollFor(cursor: CursorFrame | null, score: VideoScore, layout: VideoCanvasLayout, current: number): number {
   if (layout.horizontal) return 0;
+  if (layout.singleLine) {
+    // Center the staff lines of the active line in the frame. The anchor is the
+    // middle of `lineAlignedBounds` (the staff lines of both the standard and
+    // tab staves), not the top of the line's box: symbols above the staff must
+    // not shift the notation from line to line.
+    if (!cursor) return current;
+    const staffCenter = cursor.bounds.systemTop + cursor.bounds.systemH / 2;
+    return staffCenter * layout.scale - layout.scoreH / 2;
+  }
   if (!cursor) return current;
   const target = cursor.bounds.systemTop * layout.scale + layout.scoreTop - layout.scoreH * 0.38;
   const max = Math.max(0, score.height * layout.scale - layout.scoreH + 10);

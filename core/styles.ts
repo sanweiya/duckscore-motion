@@ -520,7 +520,7 @@ export const CSS = `
 }
 .gsp-vs-result a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .gsp-vs-side {
-  flex: 0 0 326px; width: 326px; min-height: 0; display: flex; flex-direction: column;
+  flex: 0 0 326px; width: 326px; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: rgba(250,252,255,.96); border-left: 1px solid rgba(54,93,135,.15);
 }
 .gsp-vs-side-head {
@@ -528,7 +528,9 @@ export const CSS = `
   background: rgba(67,109,157,.07); border-bottom: 1px solid rgba(67,109,157,.16);
 }
 .gsp-vs-side-head h3 { margin: 0; flex: 1; font-size: 12.5px; font-weight: 700; color: #365d87; }
-.gsp-vs-fieldset { flex: 1 1 auto; min-height: 0; border: 0; margin: 0; padding: 0; display: block; overflow: hidden; }
+/* A fieldset refuses to shrink below its min-content width by default, which
+   would push the whole panel past the viewport as soon as one row cannot wrap. */
+.gsp-vs-fieldset { flex: 1 1 auto; min-width: 0; min-height: 0; border: 0; margin: 0; padding: 0; display: block; overflow: hidden; }
 .gsp-vs-fieldset:disabled { opacity: .62; }
 .gsp-vs-side-body { height: 100%; overflow-y: auto; padding: 3px 12px 16px; scrollbar-width: thin; }
 .gsp-vs-side .gsp-group { padding: 9px 0 10px; }

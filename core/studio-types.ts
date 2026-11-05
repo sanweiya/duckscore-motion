@@ -1,7 +1,7 @@
 import { DEFAULT_SCORE_COLORS, type FontKey, type FontOverride, type ScoreColors } from './score-style';
 
 export type Translate = (key: string) => string;
-export type LayoutMode = 'page' | 'horizontal' | 'parchment';
+export type LayoutMode = 'page' | 'pageLine' | 'horizontal';
 export type MediaKind = 'audio' | 'video';
 export type AspectRatio = '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
 
@@ -107,13 +107,35 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   colors: DEFAULT_SCORE_COLORS,
 };
 
-/** Fresh copy of the first-run layout (the nested objects must not be shared). */
-export function defaultLayout(): LayoutSettings {
+/**
+* First-run layout of the basic preview (the player). The player and the video
+* studio keep independent layout settings and independent storage entries, so
+* designing a video never changes how the score is browsed afterwards. The
+* player therefore starts on a plain page at 100 %, no matter what the studio
+* was last set to.
+*/
+export const DEFAULT_PLAYER_LAYOUT: LayoutSettings = {
+  ...DEFAULT_LAYOUT,
+  mode: 'page',
+  scale: 1,
+};
+
+function cloneLayout(base: LayoutSettings): LayoutSettings {
   return {
-    ...DEFAULT_LAYOUT,
-    fonts: Object.fromEntries(Object.entries(DEFAULT_LAYOUT.fonts).map(([key, value]) => [key, { ...value }])),
-    colors: { ...DEFAULT_LAYOUT.colors },
+    ...base,
+    fonts: Object.fromEntries(Object.entries(base.fonts).map(([key, value]) => [key, { ...value }])),
+    colors: { ...base.colors },
   };
+}
+
+/** Fresh copy of the first-run studio layout (nested objects must not be shared). */
+export function defaultLayout(): LayoutSettings {
+  return cloneLayout(DEFAULT_LAYOUT);
+}
+
+/** Fresh copy of the first-run player layout. */
+export function defaultPlayerLayout(): LayoutSettings {
+  return cloneLayout(DEFAULT_PLAYER_LAYOUT);
 }
 
 export const DEFAULT_STUDIO: StudioSettings = {

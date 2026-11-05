@@ -5,9 +5,10 @@
  * and soundfont, and WebCodecs/workers/clipboard all prefer a secure context.
  * `http://127.0.0.1` counts as secure in Chromium, so this is enough.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +35,17 @@ const types = new Map(Object.entries({
   '.txt': 'text/plain; charset=utf-8',
 }));
 
-const server = http.createServer(async (req, res) => {
+/**
+ * WebCodecs (video export) only runs in a secure context. `http://127.0.0.1`
+ * counts as one, a LAN address like `http://192.168.1.9` does not - so a second
+ * HTTPS listener with a self-signed certificate is offered for LAN clients.
+ */
+const tlsPort = Number(process.env.TLS_PORT ?? 0);
+const certPath = process.env.TLS_CERT ?? path.join(appDir, 'certs', 'dev-cert.pem');
+const keyPath = process.env.TLS_KEY ?? path.join(appDir, 'certs', 'dev-key.pem');
+const tlsAvailable = tlsPort > 0 && existsSync(certPath) && existsSync(keyPath);
+
+const handler = async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   let pathname;
   try {
@@ -75,9 +86,23 @@ const server = http.createServer(async (req, res) => {
     'x-content-type-options': 'nosniff',
   });
   createReadStream(target).on('error', () => res.destroy()).pipe(res);
-});
+};
 
+const server = http.createServer(handler);
 server.listen(port, host, () => {
   console.log(`GP Studio: http://${host}:${port}/`);
-  console.log('Stop with Ctrl+C.');
 });
+
+if (tlsAvailable) {
+  const tlsServer = https.createServer(
+    { cert: readFileSync(certPath), key: readFileSync(keyPath) },
+    handler,
+  );
+  tlsServer.listen(tlsPort, host, () => {
+    console.log(`GP Studio (secure, export works): https://${host}:${tlsPort}/`);
+    console.log('The certificate is self-signed: accept the browser warning once.');
+  });
+} else if (tlsPort > 0) {
+  console.log(`TLS port requested but no certificate found at ${certPath} / ${keyPath}.`);
+}
+console.log('Stop with Ctrl+C.');

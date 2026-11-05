@@ -2,9 +2,9 @@ import {
   ASPECT_RATIOS,
   CUSTOM_ASPECT_TOLERANCE,
   DEFAULT_EXPORT,
-  DEFAULT_LAYOUT,
   DEFAULT_STUDIO,
   defaultLayout,
+  defaultPlayerLayout,
   even,
   frameSizeForAspect,
   type AspectRatio,
@@ -22,6 +22,11 @@ import { DEFAULT_CURSOR_STYLE, type CursorStyle } from './video';
 
 const STUDIO_KEY = 'gp-score-player.studio.v1';
 const EXPORT_KEY = 'gp-score-player.export.v1';
+/**
+* Layout memory of the basic preview. The studio layout lives in STUDIO_KEY, so
+* both surfaces remember their own mode/zoom and never overwrite each other.
+*/
+const PLAYER_LAYOUT_KEY = 'gp-score-player.layout.v1';
 
 export interface StoredStudioState {
   studio: StudioSettings;
@@ -70,8 +75,8 @@ function hexColor(value: unknown, fallback: string): string {
   return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
-function layoutMode(value: unknown): LayoutMode {
-  return value === 'horizontal' || value === 'parchment' || value === 'page' ? value : 'page';
+function layoutMode(value: unknown, fallback: LayoutMode = 'page'): LayoutMode {
+  return value === 'horizontal' || value === 'pageLine' || value === 'page' ? value : fallback;
 }
 
 function aspectRatio(value: unknown): AspectRatio {
@@ -107,15 +112,20 @@ function sanitizeColors(value: unknown): ScoreColors {
   };
 }
 
-function sanitizeLayout(value: unknown): LayoutSettings {
-  if (!isRecord(value)) return defaultLayout();
-  const bars = Math.round(numberIn(value.barsPerRow, DEFAULT_LAYOUT.barsPerRow, -1, 8));
+/**
+* Sanitizes a stored layout. `base` is a fresh default copy (studio or player)
+* and doubles as the value for every missing/invalid field, so the two surfaces
+* fall back to their own defaults instead of the studio ones.
+*/
+function sanitizeLayout(value: unknown, base: LayoutSettings): LayoutSettings {
+  if (!isRecord(value)) return base;
+  const bars = Math.round(numberIn(value.barsPerRow, base.barsPerRow, -1, 8));
   return {
-    mode: layoutMode(value.mode),
-    scale: numberIn(value.scale, DEFAULT_LAYOUT.scale, 0.25, 2),
-    stretch: numberIn(value.stretch, DEFAULT_LAYOUT.stretch, 0.2, 2),
+    mode: layoutMode(value.mode, base.mode),
+    scale: numberIn(value.scale, base.scale, 0.25, 4),
+    stretch: numberIn(value.stretch, base.stretch, 0.2, 2),
     barsPerRow: bars === 0 ? -1 : bars,
-    voice2: Math.round(numberIn(value.voice2, DEFAULT_LAYOUT.voice2, 20, 100)),
+    voice2: Math.round(numberIn(value.voice2, base.voice2, 20, 100)),
     fonts: sanitizeFonts(value.fonts),
     colors: sanitizeColors(value.colors),
   };
@@ -194,12 +204,24 @@ export function loadStudioState(): StoredStudioState {
   }
   return {
     studio: sanitizeStudio(stored.studio),
-    layout: sanitizeLayout(stored.layout),
+    layout: sanitizeLayout(stored.layout, defaultLayout()),
   };
 }
 
 export function saveStudioState(state: StoredStudioState): void {
   writeJson(STUDIO_KEY, state);
+}
+
+export function loadPlayerLayout(): LayoutSettings {
+  const layout = sanitizeLayout(readJson(PLAYER_LAYOUT_KEY), defaultPlayerLayout());
+  // The single-line framing only exists inside the video workbench, which keeps
+  // its own layout; the player always shows a full page or the strip.
+  if (layout.mode === 'pageLine') layout.mode = 'page';
+  return layout;
+}
+
+export function savePlayerLayout(layout: LayoutSettings): void {
+  writeJson(PLAYER_LAYOUT_KEY, layout);
 }
 
 export function loadExportState(aspect: AspectRatio): StoredExportState {

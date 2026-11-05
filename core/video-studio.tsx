@@ -47,6 +47,8 @@ import {
   estimateVideoBitrate,
   OfflineExportError,
   renderOfflineVideo,
+  scoreTimelineMs,
+  synthesizeScoreAudio,
   tickAtTime,
   VIDEO_CODECS_BY_CONTAINER,
   videoCodecSupported,
@@ -73,6 +75,8 @@ export interface VideoStudioProps {
   assetBase: string;
   scriptFile: string;
   fontDirectory: string;
+  /** URL of the soundfont, used to synthesize a soundtrack when there is none. */
+  soundFontUrl: string;
   exportCodecSupported: boolean;
   onStudioChange(next: StudioSettings): void;
   onLayoutChange(next: LayoutSettings): void;
@@ -261,6 +265,9 @@ export function VideoStudio(props: VideoStudioProps): any {
   const scrollRef = useRef(0);
   const scrollXRef = useRef(0);
   const lastCursorPxRef = useRef<number | null>(null);
+  // Last staff system shown; keeps the single-line clip stable when the
+  // playhead is momentarily gone at the very end of the score.
+  const lastSystemTopRef = useRef<number | null>(null);
   const cursorSmoothRef = useRef(createCursorSmoothingState());
   const lastCameraWallRef = useRef(0);
   const leadVelocityRef = useRef(0);
@@ -325,9 +332,21 @@ export function VideoStudio(props: VideoStudioProps): any {
     [props.meta, props.trackIndex],
   );
   const title = props.meta?.title || props.fileName || t('header.empty');
-  const scoreDuration = props.api?.endTime || 0;
+  // Length according to the score's own tempo map. It is available as soon as
+  // alphaTab built the tick lookup, i.e. without ever starting the player, which
+  // is what scores without a backing track need.
+  const scoreDuration = useMemo(() => {
+    const derived = scoreTimelineMs(props.api);
+    return derived > 0 ? derived : (props.api?.endTime || 0);
+  }, [props.api]);
+  // No embedded/external audio: the studio plays the score with alphaTab's
+  // MIDI synthesizer, strictly at the tempo written in the score.
+  const midiMode = !props.audioSource;
+  const midiPlayback = midiMode && !!props.api;
   // In horizontal mode the zoom slider drives the camera; re-rendering the
   // score at a different scale would be cancelled by the height fit.
+  // Page and single-line both render at the zoom slider's layout scale: in the
+  // single-line page, zooming in means fewer bars per line, never cropping.
   const scoreScale = props.layout.mode === 'horizontal' ? 1 : props.layout.scale;
 
   const previewAudio = exportSettings.includeAudio ? props.audioSource : null;
@@ -410,7 +429,11 @@ export function VideoStudio(props: VideoStudioProps): any {
     mutedRef.current = muted;
     const audio = audioRef.current;
     if (audio) audio.muted = muted;
-  }, [muted]);
+    if (midiPlayback) {
+      // The preview is silent when muted, exactly like a backing track.
+      try { if (props.api) props.api.masterVolume = muted ? 0 : 1; } catch { /* ignore */ }
+    }
+  }, [muted, midiPlayback, props.api]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -440,6 +463,10 @@ export function VideoStudio(props: VideoStudioProps): any {
     });
   }, [props.studio.aspect]);
 
+  // Page and single-line share the exact same rendered surface; only the
+  // camera differs, so a mode switch between them must not re-render the score.
+  const renderMode: 'page' | 'horizontal' = props.layout.mode === 'horizontal' ? 'horizontal' : 'page';
+
   // Build the exact same VideoScore that the encoder will use. This is the
   // expensive part, so debounce rapid slider movement.
   useEffect(() => {
@@ -460,7 +487,7 @@ export function VideoStudio(props: VideoStudioProps): any {
           spacingRatio: spacingRatioFor(props.layout.stretch),
           barWidths: props.barWidths,
           scale: scoreScale,
-          layoutMode: props.layout.mode,
+          layoutMode: renderMode,
           voice2: props.layout.voice2,
           fonts: props.layout.fonts,
           colors: scoreColorsForTheme(props.studio.theme, props.layout.colors),
@@ -494,7 +521,7 @@ export function VideoStudio(props: VideoStudioProps): any {
     props.api,
     props.bytes,
     props.trackIndex,
-    props.layout.mode,
+    renderMode,
     scoreScale,
     props.layout.stretch,
     props.layout.barsPerRow,
@@ -512,6 +539,11 @@ export function VideoStudio(props: VideoStudioProps): any {
     props.fontDirectory,
   ]);
 
+  useEffect(() => () => {
+    // Leaving the studio must not leave the synthesizer playing.
+    try { props.api?.pause(); } catch { /* ignore */ }
+  }, [props.api]);
+
   const drawFrame = useCallback((atMs: number, immediate: boolean) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -523,9 +555,11 @@ export function VideoStudio(props: VideoStudioProps): any {
       return;
     }
     const horizontal = props.layout.mode === 'horizontal';
+    const singleLine = props.layout.mode === 'pageLine';
     const layout = layoutVideoCanvas(canvas.width, canvas.height, score, {
       ...props.studio,
       horizontal,
+      singleLine,
       zoom: horizontal ? props.layout.scale : 1,
     });
     const scoreTime = audioTimeline.mapAudioToScore ? audioTimeline.mapAudioToScore(atMs) : atMs;
@@ -601,6 +635,14 @@ export function VideoStudio(props: VideoStudioProps): any {
       scrollRef.current = 0;
       lastCursorPxRef.current = cursorPx;
       lastCameraWallRef.current = now;
+    } else if (layout.singleLine) {
+      // One line at a time: jump straight to the active line's framing. No
+      // easing here on purpose - a line change must not slide, horizontally
+      // either.
+      scrollRef.current = targetY;
+      scrollXRef.current = baseTargetX;
+      lastCursorPxRef.current = null;
+      lastCameraWallRef.current = now;
     } else {
       // Vertical camera damping from the wall-clock delta, matching the export
       // path's per-frame 1/fps step (offline-export.ts). A hardcoded /60 would
@@ -611,10 +653,12 @@ export function VideoStudio(props: VideoStudioProps): any {
       lastCursorPxRef.current = null;
       lastCameraWallRef.current = now;
     }
+    if (paintCursor) lastSystemTopRef.current = paintCursor.bounds.systemTop;
     paintVideoFrame(ctx, score, layout, {
       scrollY: scrollRef.current,
       scrollX: scrollXRef.current,
       cursor: paintCursor,
+      systemTop: paintCursor ? paintCursor.bounds.systemTop : lastSystemTopRef.current ?? undefined,
       accent: '#436d9d',
       trackLabel,
       cursorStyle: cursorAppearance,
@@ -652,26 +696,35 @@ export function VideoStudio(props: VideoStudioProps): any {
       last = now;
       let next = timeRef.current + dt * 1000;
       const audio = audioRef.current;
+      let sourceMs: number | null = null;
       if (previewAudio && audio && !audio.paused && !audio.ended && !audio.seeking && audio.readyState >= 2) {
         const offset = Math.max(0, previewAudio.offsetSec || 0);
         const audioTime = (audio.currentTime - offset) * 1000;
-        if (Number.isFinite(audioTime) && audioTime >= 0) {
-          // Media clocks update in coarse steps. Advance a local predicted
-          // clock every frame and pull it toward the media clock with a slow,
-          // monotonic correction. This keeps the cursor fluid while remaining
-          // phase-locked to the soundtrack.
-          const predicted = audioSmoothRef.current + dt * 1000;
-          const error = audioTime - predicted;
-          if (Math.abs(error) > 800) {
-            audioSmoothRef.current = audioTime;
-          } else {
-            audioSmoothRef.current = Math.max(
-              audioSmoothRef.current,
-              predicted + error * 0.03,
-            );
-          }
-          next = audioSmoothRef.current;
+        if (Number.isFinite(audioTime) && audioTime >= 0) sourceMs = audioTime;
+      } else if (midiPlayback) {
+        // The synthesizer is the clock for scores without a backing track.
+        const api = props.api;
+        if (api && api.playerState === alphaTab.synth.PlayerState.Playing) {
+          const position = api.timePosition;
+          if (Number.isFinite(position) && position >= 0) sourceMs = position;
         }
+      }
+      if (sourceMs !== null) {
+        // Media/synth clocks update in coarse steps. Advance a local predicted
+        // clock every frame and pull it toward the source clock with a slow,
+        // monotonic correction. This keeps the cursor fluid while remaining
+        // phase-locked to the sound.
+        const predicted = audioSmoothRef.current + dt * 1000;
+        const error = sourceMs - predicted;
+        if (Math.abs(error) > 800) {
+          audioSmoothRef.current = sourceMs;
+        } else {
+          audioSmoothRef.current = Math.max(
+            audioSmoothRef.current,
+            predicted + error * 0.03,
+          );
+        }
+        next = audioSmoothRef.current;
       } else {
         audioSmoothRef.current = timeRef.current;
       }
@@ -683,6 +736,7 @@ export function VideoStudio(props: VideoStudioProps): any {
         audioSmoothRef.current = duration;
         setPlaying(false);
         audio?.pause();
+        try { props.api?.pause(); } catch { /* ignore */ }
         return;
       }
       timeRef.current = next;
@@ -695,11 +749,34 @@ export function VideoStudio(props: VideoStudioProps): any {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [playing, duration, drawFrame, previewAudio]);
+  }, [playing, duration, drawFrame, previewAudio, midiPlayback, props.api]);
+
+  const startMidi = useCallback(() => {
+    const api = props.api;
+    if (!api) return;
+    try {
+      // Strictly the written tempo: no speed change, no count-in, no metronome,
+      // no loop - the video timeline must match the score exactly.
+      api.playbackSpeed = 1;
+      api.countInVolume = 0;
+      api.metronomeVolume = 0;
+      api.isLooping = false;
+      api.timePosition = timeRef.current;
+      api.play();
+    } catch {
+      if (mountedRef.current && playingRef.current) {
+        props.onNotify('error', t('studio.audioFailed'));
+      }
+    }
+  }, [props.api, props.onNotify, t]);
 
   const startAudio = useCallback(() => {
+    if (!previewAudio) {
+      if (midiPlayback) startMidi();
+      return;
+    }
     const audio = audioRef.current;
-    if (!audio || !previewAudio) return;
+    if (!audio) return;
     if (!audio.src) {
       pendingPlayRef.current = true;
       return;
@@ -719,7 +796,7 @@ export function VideoStudio(props: VideoStudioProps): any {
     };
     if (audio.readyState >= 1) play();
     else pendingPlayRef.current = true;
-  }, [previewAudio, props.onNotify, t]);
+  }, [previewAudio, midiPlayback, startMidi, props.onNotify, t]);
 
   const seek = useCallback((value: number) => {
     const next = clamp(Number.isFinite(value) ? value : 0, 0, duration);
@@ -729,13 +806,17 @@ export function VideoStudio(props: VideoStudioProps): any {
     playingRef.current = false;
     pendingPlayRef.current = false;
     audioRef.current?.pause();
+    try { props.api?.pause(); } catch { /* ignore */ }
+    if (midiPlayback && props.api) {
+      try { props.api.timePosition = next; } catch { /* ignore */ }
+    }
     setPlaying(false);
     if (audioRef.current && previewAudio && audioRef.current.readyState >= 1) {
       const offset = Math.max(0, previewAudio.offsetSec || 0);
       seekMedia(audioRef.current, offset + next / 1000);
     }
     drawFrame(next, true);
-  }, [duration, drawFrame, previewAudio]);
+  }, [duration, drawFrame, previewAudio, midiPlayback, props.api]);
 
   const togglePreview = useCallback(() => {
     if (!previewScore || duration <= 0) return;
@@ -744,6 +825,7 @@ export function VideoStudio(props: VideoStudioProps): any {
       pendingPlayRef.current = false;
       setPlaying(false);
       audioRef.current?.pause();
+      try { props.api?.pause(); } catch { /* ignore */ }
       return;
     }
     if (timeRef.current >= duration - 1) {
@@ -899,7 +981,6 @@ export function VideoStudio(props: VideoStudioProps): any {
       setExportError(t('export.noCodecs'));
       return;
     }
-    const withAudio = !!props.audioSource && exportSettings.includeAudio;
     const frame = exportFrameSize(exportSettings, props.studio.aspect);
     if (frame.width > 4096 || frame.height > 4096) {
       setExportError(t('export.tooLarge'));
@@ -915,7 +996,36 @@ export function VideoStudio(props: VideoStudioProps): any {
     playingRef.current = false;
     setPlaying(false);
     audioRef.current?.pause();
+    try { props.api?.pause(); } catch { /* ignore */ }
     try {
+      // Soundtrack: the backing/external audio, or - when the score has none -
+      // the score itself rendered with alphaTab's MIDI synthesizer.
+      let soundtrack: OfflineAudioSource | null = exportSettings.includeAudio ? props.audioSource : null;
+      if (!soundtrack && exportSettings.includeAudio && midiMode) {
+        setExportMessage(t('export.midiAudio'));
+        setExportProgress(1);
+        try {
+          const rendered = await synthesizeScoreAudio(props.api, props.soundFontUrl, (ratio) => {
+            if (!mountedRef.current || runtime.cancelled) return;
+            setExportProgress(1 + ratio * 5);
+            setExportMessage(t('export.midiAudio'));
+          });
+          soundtrack = {
+            bytes: rendered.bytes,
+            offsetSec: 0,
+            // Identity map: the synth follows the score's own tempo, so audio
+            // time and score time are the same timeline.
+            syncPoints: [
+              { audioMs: 0, scoreMs: 0 },
+              { audioMs: rendered.durationMs, scoreMs: rendered.durationMs },
+            ],
+          };
+        } catch (error) {
+          if (runtime.cancelled) throw error;
+          props.onNotify('info', t('export.midiAudioFailed'));
+        }
+      }
+      const withAudio = !!soundtrack;
       const result = await renderOfflineVideo({
         api: props.api,
         score: previewScore,
@@ -931,10 +1041,11 @@ export function VideoStudio(props: VideoStudioProps): any {
           showHeader: props.studio.showHeader,
           showMargins: props.studio.showMargins,
           horizontal: props.layout.mode === 'horizontal',
+          singleLine: props.layout.mode === 'pageLine',
           zoom: props.layout.scale,
           theme: props.studio.theme,
         },
-        audio: withAudio ? props.audioSource : null,
+        audio: soundtrack,
         container: exportSettings.container,
         videoCodec: exportSettings.videoCodec,
         quality: exportSettings.quality,
@@ -985,13 +1096,17 @@ export function VideoStudio(props: VideoStudioProps): any {
     setExportMessage(t('export.cancelling'));
   };
 
-  const previewAudioLabel = !previewAudio
-    ? t('studio.silentPreview')
-    : audioFailed
-      ? t('studio.audioUnavailable')
-      : muted
-        ? t('studio.mutedPreview')
-        : t('studio.audioPreview');
+  const previewAudioLabel = midiMode
+    ? muted
+      ? t('studio.mutedPreview')
+      : t('studio.midiPreview')
+    : !previewAudio
+      ? t('studio.silentPreview')
+      : audioFailed
+        ? t('studio.audioUnavailable')
+        : muted
+          ? t('studio.mutedPreview')
+          : t('studio.audioPreview');
 
   const close = () => {
     if (exporting) return;
@@ -1273,12 +1388,13 @@ export function VideoStudio(props: VideoStudioProps): any {
                       value={props.layout.mode}
                       onChange={(event) => props.onLayoutChange({ ...props.layout, mode: event.target.value as LayoutMode })}
                     >
-                      {(['page', 'horizontal', 'parchment'] as LayoutMode[]).map((mode) => (
+                      {(['page', 'pageLine', 'horizontal'] as LayoutMode[]).map((mode) => (
                         <option key={mode} value={mode}>{t(`layout.${mode}`)}</option>
                       ))}
                     </select>
                   </div>
                   {props.layout.mode === 'horizontal' && <p className="gsp-hint">{t('studio.horizontalHint')}</p>}
+                  {props.layout.mode === 'pageLine' && <p className="gsp-hint">{t('studio.singleLineHint')}</p>}
                   <div className="gsp-field">
                     <label htmlFor="gsp-vs-scale">{t('layout.scale')}</label>
                     <div className="gsp-inline">
@@ -1286,7 +1402,7 @@ export function VideoStudio(props: VideoStudioProps): any {
                         id="gsp-vs-scale"
                         type="range"
                         min={25}
-                        max={200}
+                        max={400}
                         step={5}
                         value={Math.round(props.layout.scale * 100)}
                         onChange={(event) => props.onLayoutChange({ ...props.layout, scale: Number(event.target.value) / 100 })}
@@ -1317,7 +1433,7 @@ export function VideoStudio(props: VideoStudioProps): any {
                       className="gsp-select"
                       value={props.layout.barsPerRow}
                       onChange={(event) => props.onLayoutChange({ ...props.layout, barsPerRow: Number(event.target.value) })}
-                      disabled={props.layout.mode !== 'page'}
+                      disabled={props.layout.mode === 'horizontal'}
                     >
                       <option value={-1}>{t('layout.auto')}</option>
                       {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => (
@@ -1524,8 +1640,11 @@ export function VideoStudio(props: VideoStudioProps): any {
                     </select>
                   </div>
                   <div className="gsp-vs-source">
-                    <span className="gsp-chip">{props.external ? props.external.name : props.meta?.hasBackingTrack ? t('audio.embedded') : t('export.noAudioTrack')}</span>
+                    <span className="gsp-chip">{props.external ? props.external.name : props.meta?.hasBackingTrack ? t('audio.embedded') : t('studio.midiSource')}</span>
                   </div>
+                  {/* The chip is a single-line label; the full sentence has to wrap
+                      into a hint, otherwise it widens the whole side panel. */}
+                  {midiMode && <p className="gsp-hint">{t('export.noAudioTrack')}</p>}
                 </section>
 
                 {!props.exportCodecSupported && (
@@ -1678,8 +1797,7 @@ export function VideoStudio(props: VideoStudioProps): any {
             <label className="gsp-check gsp-vs-audio-check">
               <input
                 type="checkbox"
-                checked={!!props.audioSource && exportSettings.includeAudio}
-                disabled={!props.audioSource}
+                checked={exportSettings.includeAudio}
                 onChange={(event) => setExportSettings((current) => ({ ...current, includeAudio: event.target.checked }))}
               />
               {t('export.includeAudio')}

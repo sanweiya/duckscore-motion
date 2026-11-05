@@ -43,6 +43,9 @@ await cp(path.join(appDir, 'src/app.css'), path.join(dist, 'app.css'));
 
 // alphaTab worker entry, SMuFL fonts and the Sonivox soundfont.
 await cp(path.join(vendorDir, 'alphaTab.mjs'), path.join(assets, 'alphaTab.mjs'));
+// Classic build used as the audio-export worker: alphaTab creates the worker
+// with `importScripts`, which cannot load the ESM entry.
+await cp(path.join(vendorDir, 'alphaTab.worker.js'), path.join(assets, 'alphaTab.worker.js'));
 await cp(path.join(vendorDir, 'alphaTab.core.mjs'), path.join(assets, 'alphaTab.core.mjs'));
 await cp(path.join(vendorDir, 'alphaTab-LICENSE'), path.join(assets, 'alphaTab-LICENSE'));
 await cp(path.join(vendorDir, 'font'), path.join(assets, 'font'), { recursive: true });

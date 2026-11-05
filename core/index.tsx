@@ -6,7 +6,7 @@ import { applyFontOverrides, secondaryVoiceColor, scoreColor, FONT_KEYS, type Fo
 import { ReactRuntime } from './runtime';
 import { VideoStudio } from './video-studio';
 import {
-  defaultLayout,
+  defaultPlayerLayout,
   spacingRatioFor,
   type AspectRatio,
   type ExternalMedia,
@@ -20,7 +20,7 @@ import {
   type Translate,
 } from './studio-types';
 import type { OfflineAudioSource } from './offline-export';
-import { loadStudioState, saveStudioState, type StoredStudioState } from './studio-storage';
+import { loadPlayerLayout, loadStudioState, savePlayerLayout, saveStudioState, type StoredStudioState } from './studio-storage';
 
 declare global {
   interface Window {
@@ -44,7 +44,7 @@ export interface AssetLocations {
 function assetLocationsFor(base: string): AssetLocations {
   return {
     assetBase: base,
-    scriptFile: `${base}alphaTab.mjs`,
+    scriptFile: `${base}alphaTab.worker.js`,
     fontDirectory: `${base}font/`,
     soundfont: `${base}soundfont/sonivox.sf2`,
   };
@@ -62,7 +62,7 @@ export function configureAssets(baseOrLocations: string | Partial<AssetLocations
   const base = baseOrLocations.assetBase ?? assets.assetBase;
   assets = {
     assetBase: base,
-    scriptFile: baseOrLocations.scriptFile ?? `${base}alphaTab.mjs`,
+    scriptFile: baseOrLocations.scriptFile ?? `${base}alphaTab.worker.js`,
     fontDirectory: baseOrLocations.fontDirectory ?? `${base}font/`,
     soundfont: baseOrLocations.soundfont ?? `${base}soundfont/sonivox.sf2`,
   };
@@ -212,9 +212,14 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   const storedStudioRef = useRef<StoredStudioState | null>(null);
   if (storedStudioRef.current === null) storedStudioRef.current = loadStudioState();
   const initialStudioState = storedStudioRef.current;
+  // The basic preview and the video studio keep separate layout memories: a
+  // video designed in the studio must never reshape the player afterwards.
+  const storedPlayerLayoutRef = useRef<LayoutSettings | null>(null);
+  if (storedPlayerLayoutRef.current === null) storedPlayerLayoutRef.current = loadPlayerLayout();
+  const initialPlayerLayout = storedPlayerLayoutRef.current;
   const externalRef = useRef<ExternalMedia | null>(null);
   const trackIndexRef = useRef(0);
-  const layoutRef = useRef<LayoutSettings>(initialStudioState.layout);
+  const playerLayoutRef = useRef<LayoutSettings>(initialPlayerLayout);
   const barWidthsRef = useRef<Record<number, number>>({});
   const barWidthBasesRef = useRef<Map<number, number> | null>(null);
   const manualSystemsRef = useRef(false);
@@ -239,7 +244,10 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   const [trackIndex, setTrackIndex] = useState(0);
   const [, setTracksVersion] = useState(0);
   const [notation, setNotation] = useState<NotationSettings>({ standard: true, tab: true });
-  const [layout, setLayout] = useState<LayoutSettings>(initialStudioState.layout);
+  const [playerLayout, setPlayerLayout] = useState<LayoutSettings>(initialPlayerLayout);
+  // Studio layout is a separate, independently persisted state. The workbench
+  // renders its own alphaTab instance, so it never needs the live player api.
+  const [studioLayout, setStudioLayout] = useState<LayoutSettings>(initialStudioState.layout);
   const [fontKey, setFontKey] = useState<FontKey>('title');
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -270,7 +278,8 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   useEffect(() => { loopRef.current = loop; }, [loop]);
   useEffect(() => { playingRef.current = playing; }, [playing]);
   useEffect(() => { trackIndexRef.current = trackIndex; }, [trackIndex]);
-  useEffect(() => { saveStudioState({ studio, layout }); }, [studio, layout]);
+  useEffect(() => { saveStudioState({ studio, layout: studioLayout }); }, [studio, studioLayout]);
+  useEffect(() => { savePlayerLayout(playerLayout); }, [playerLayout]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -324,12 +333,10 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   }, []);
 
   const settingsFor = useCallback((externalMode: boolean): any => {
-    const current = layoutRef.current;
+    const current = playerLayoutRef.current;
     const mode = current.mode === 'horizontal'
       ? alphaTab.LayoutMode.Horizontal
-      : current.mode === 'parchment'
-        ? alphaTab.LayoutMode.Parchment
-        : alphaTab.LayoutMode.Page;
+      : alphaTab.LayoutMode.Page;
     return {
       core: {
         scriptFile: assets.scriptFile,
@@ -362,7 +369,14 @@ export function Player(props: { t?: Translate }): React.ReactElement {
         enableAnimatedBeatCursor: true,
         outputMode: alphaTab.PlayerOutputMode.WebAudioScriptProcessor,
         scrollElement: scrollRef.current ?? 'html,body',
-        bufferTimeInMilliseconds: 200,
+        // alphaTab's ScriptProcessor output pulls 4096 frames (8192 interleaved
+        // samples) per callback but only keeps half the configured buffer in
+        // flight. Anything below four buffers (~342 ms at 48 kHz) leaves every
+        // callback half empty: the synth then plays at 0.5x with constant
+        // crackle, because the reported time position only advances with the
+        // samples that were actually there. Keep alphaTab's own default (500 ms)
+        // and never go under 350.
+        bufferTimeInMilliseconds: 500,
       },
     };
   }, []);
@@ -670,7 +684,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
         return;
       }
       apiRef.current = api;
-      applyFontOverrides(api, layoutRef.current.fonts);
+      applyFontOverrides(api, playerLayoutRef.current.fonts);
       bindApi(api, token);
       let loaded = false;
       try {
@@ -699,16 +713,14 @@ export function Player(props: { t?: Translate }): React.ReactElement {
     }, 120);
   }, []);
 
-  const applyLayout = useCallback((next: LayoutSettings) => {
-    layoutRef.current = next;
-    setLayout(next);
+  const applyPlayerLayout = useCallback((next: LayoutSettings) => {
+    playerLayoutRef.current = next;
+    setPlayerLayout(next);
     const api = apiRef.current;
     if (!api) return;
     api.settings.display.layoutMode = next.mode === 'horizontal'
       ? alphaTab.LayoutMode.Horizontal
-      : next.mode === 'parchment'
-        ? alphaTab.LayoutMode.Parchment
-        : alphaTab.LayoutMode.Page;
+      : alphaTab.LayoutMode.Page;
     api.settings.display.scale = next.scale;
     api.settings.display.stretchForce = next.stretch;
     api.settings.display.spacingRatio = spacingRatioFor(next.stretch);
@@ -724,6 +736,13 @@ export function Player(props: { t?: Translate }): React.ReactElement {
     scheduleRender();
   }, [scheduleRender]);
 
+  // The studio owns a second alphaTab instance (built from the score bytes), so
+  // its layout only has to update this state: the player's api and its render
+  // stay untouched, and switching back to the player shows its own layout.
+  const applyStudioLayout = useCallback((next: LayoutSettings) => {
+    setStudioLayout(next);
+  }, []);
+
   const applyBarWidths = useCallback((widths: Record<number, number>) => {
     barWidthsRef.current = widths;
     setBarWidths(widths);
@@ -738,7 +757,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
       return typeof value === 'number' ? clamp(value, 50, 200) / 100 : 1;
     };
     const hasWidths = Object.keys(widths).length > 0;
-    const horizontal = layoutRef.current.mode === 'horizontal';
+    const horizontal = playerLayoutRef.current.mode === 'horizontal';
 
     const resetPageOverrides = () => {
       for (const staff of track.staves) {
@@ -828,15 +847,15 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   }, [applyBarWidths]);
 
   const applyFont = useCallback((patch: Partial<FontOverride>) => {
-    const current = layoutRef.current;
-    applyLayout({
+    const current = playerLayoutRef.current;
+    applyPlayerLayout({
       ...current,
       fonts: {
         ...current.fonts,
         [fontKey]: { ...current.fonts?.[fontKey], ...patch },
       },
     });
-  }, [applyLayout, fontKey]);
+  }, [applyPlayerLayout, fontKey]);
 
   const applyNotation = useCallback((api: alphaTab.AlphaTabApi, index: number, flags: NotationSettings) => {
     const track = api.score?.tracks[index];
@@ -1227,7 +1246,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
     : meta?.hasBackingTrack
       ? t('status.embedded')
       : t('status.synth');
-  const selectedFont = layout.fonts?.[fontKey] ?? {};
+  const selectedFont = playerLayout.fonts?.[fontKey] ?? {};
   const scoreTitle = meta?.title || fileName || t('header.empty');
   const scoreArtist = meta?.artist || '';
   const progressPct = effectiveDuration > 0 ? clamp(position / effectiveDuration, 0, 1) * 100 : 0;
@@ -1242,8 +1261,16 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   }, [external, meta, status]);
 
   const openStudio = useCallback(() => {
-    if (!apiRef.current || !bytesRef.current) return;
-    try { apiRef.current.pause(); } catch { /* ignore */ }
+    const api = apiRef.current;
+    if (!api || !bytesRef.current) return;
+    try { api.pause(); } catch { /* ignore */ }
+    // Scores without a backing track never fire `playerReady` until playback
+    // has started (the synthesizer needs an audio context). The MIDI timing
+    // used by the video workbench only needs the tick lookup, which is built
+    // synchronously here, so the studio opens without ever pressing play.
+    try {
+      if (!(api as any).tickCache) api.loadMidiForScore();
+    } catch { /* the studio falls back to the score's own tempo */ }
     setPlaying(false);
     setPanel(null);
     setView('studio');
@@ -1332,10 +1359,12 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                   <select
                     id="gsp-mode"
                     className="gsp-select"
-                    value={layout.mode}
-                    onChange={(event) => applyLayout({ ...layoutRef.current, mode: event.target.value as LayoutMode })}
+                    value={playerLayout.mode}
+                    onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, mode: event.target.value as LayoutMode })}
                   >
-                    {(['page', 'horizontal', 'parchment'] as LayoutMode[]).map((mode) => (
+                    {/* Single-line framing is a video-workbench framing, so the
+                        player only offers the two layouts it can actually show. */}
+                    {(['page', 'horizontal'] as LayoutMode[]).map((mode) => (
                       <option key={mode} value={mode}>{t(`layout.${mode}`)}</option>
                     ))}
                   </select>
@@ -1347,12 +1376,12 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                       id="gsp-scale"
                       type="range"
                       min={25}
-                      max={200}
+                      max={400}
                       step={5}
-                      value={Math.round(layout.scale * 100)}
-                      onChange={(event) => applyLayout({ ...layoutRef.current, scale: Number(event.target.value) / 100 })}
+                      value={Math.round(playerLayout.scale * 100)}
+                      onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, scale: Number(event.target.value) / 100 })}
                     />
-                    <span className="gsp-value">{Math.round(layout.scale * 100)}%</span>
+                    <span className="gsp-value">{Math.round(playerLayout.scale * 100)}%</span>
                   </div>
                 </div>
                 <div className="gsp-field">
@@ -1364,10 +1393,10 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                       min={20}
                       max={200}
                       step={5}
-                      value={Math.round(layout.stretch * 100)}
-                      onChange={(event) => applyLayout({ ...layoutRef.current, stretch: Number(event.target.value) / 100 })}
+                      value={Math.round(playerLayout.stretch * 100)}
+                      onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, stretch: Number(event.target.value) / 100 })}
                     />
-                    <span className="gsp-value">{Math.round(layout.stretch * 100)}%</span>
+                    <span className="gsp-value">{Math.round(playerLayout.stretch * 100)}%</span>
                   </div>
                 </div>
                 <p className="gsp-hint">{t('layout.stretchHint')}</p>
@@ -1376,9 +1405,9 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                   <select
                     id="gsp-bars"
                     className="gsp-select"
-                    value={layout.barsPerRow}
-                    onChange={(event) => applyLayout({ ...layoutRef.current, barsPerRow: Number(event.target.value) })}
-                    disabled={layout.mode !== 'page'}
+                    value={playerLayout.barsPerRow}
+                    onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, barsPerRow: Number(event.target.value) })}
+                    disabled={playerLayout.mode === 'horizontal'}
                   >
                     <option value={-1}>{t('layout.auto')}</option>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => (
@@ -1395,10 +1424,10 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                       min={20}
                       max={100}
                       step={5}
-                      value={layout.voice2}
-                      onChange={(event) => applyLayout({ ...layoutRef.current, voice2: Number(event.target.value) })}
+                      value={playerLayout.voice2}
+                      onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, voice2: Number(event.target.value) })}
                     />
-                    <span className="gsp-value">{layout.voice2}%</span>
+                    <span className="gsp-value">{playerLayout.voice2}%</span>
                   </div>
                 </div>
                 <div className="gsp-field">
@@ -1485,23 +1514,23 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                 <h4>{t('layout.colors')}</h4>
                 <div className="gsp-field">
                   <label htmlFor="gsp-color-main">{t('layout.colorMain')}</label>
-                  <input id="gsp-color-main" className="gsp-color" type="color" value={layout.colors.main} onChange={(event) => applyLayout({ ...layoutRef.current, colors: { ...layoutRef.current.colors, main: event.target.value } })} />
+                  <input id="gsp-color-main" className="gsp-color" type="color" value={playerLayout.colors.main} onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, colors: { ...playerLayoutRef.current.colors, main: event.target.value } })} />
                 </div>
                 <div className="gsp-field">
                   <label htmlFor="gsp-color-staff">{t('layout.colorStaff')}</label>
-                  <input id="gsp-color-staff" className="gsp-color" type="color" value={layout.colors.staff} onChange={(event) => applyLayout({ ...layoutRef.current, colors: { ...layoutRef.current.colors, staff: event.target.value } })} />
+                  <input id="gsp-color-staff" className="gsp-color" type="color" value={playerLayout.colors.staff} onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, colors: { ...playerLayoutRef.current.colors, staff: event.target.value } })} />
                 </div>
                 <div className="gsp-field">
                   <label htmlFor="gsp-color-bar">{t('layout.colorBar')}</label>
-                  <input id="gsp-color-bar" className="gsp-color" type="color" value={layout.colors.bar} onChange={(event) => applyLayout({ ...layoutRef.current, colors: { ...layoutRef.current.colors, bar: event.target.value } })} />
+                  <input id="gsp-color-bar" className="gsp-color" type="color" value={playerLayout.colors.bar} onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, colors: { ...playerLayoutRef.current.colors, bar: event.target.value } })} />
                 </div>
                 <div className="gsp-field">
                   <label htmlFor="gsp-color-number">{t('layout.colorBarNumber')}</label>
-                  <input id="gsp-color-number" className="gsp-color" type="color" value={layout.colors.barNumber} onChange={(event) => applyLayout({ ...layoutRef.current, colors: { ...layoutRef.current.colors, barNumber: event.target.value } })} />
+                  <input id="gsp-color-number" className="gsp-color" type="color" value={playerLayout.colors.barNumber} onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, colors: { ...playerLayoutRef.current.colors, barNumber: event.target.value } })} />
                 </div>
                 <div className="gsp-field">
                   <label htmlFor="gsp-color-info">{t('layout.colorInfo')}</label>
-                  <input id="gsp-color-info" className="gsp-color" type="color" value={layout.colors.info} onChange={(event) => applyLayout({ ...layoutRef.current, colors: { ...layoutRef.current.colors, info: event.target.value } })} />
+                  <input id="gsp-color-info" className="gsp-color" type="color" value={playerLayout.colors.info} onChange={(event) => applyPlayerLayout({ ...playerLayoutRef.current, colors: { ...playerLayoutRef.current.colors, info: event.target.value } })} />
                 </div>
               </section>
 
@@ -1552,9 +1581,9 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                       type="button"
                       className="gsp-btn is-small is-ghost"
                       onClick={() => {
-                        const fonts = { ...layoutRef.current.fonts };
+                        const fonts = { ...playerLayoutRef.current.fonts };
                         delete fonts[fontKey];
-                        applyLayout({ ...layoutRef.current, fonts });
+                        applyPlayerLayout({ ...playerLayoutRef.current, fonts });
                       }}
                     >
                       {t('layout.fontClear')}
@@ -1632,7 +1661,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                   <button type="button" className="gsp-btn is-small" onClick={() => setPanel('audio')}>
                     <AudioIcon /> {t('audio')}
                   </button>
-                  <button type="button" className="gsp-btn is-small is-ghost" onClick={() => applyLayout(defaultLayout())}>
+                  <button type="button" className="gsp-btn is-small is-ghost" onClick={() => applyPlayerLayout(defaultPlayerLayout())}>
                     {t('layout.reset')}
                   </button>
                 </div>
@@ -1641,7 +1670,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
                   type="button"
                   className="gsp-btn is-primary gsp-cta-wide"
                   onClick={openStudio}
-                  disabled={!hasScore || status !== 'ready' || !playerReady}
+                  disabled={!hasScore || status !== 'ready'}
                 >
                   <VideoIcon /> {t('studio.open')}
                 </button>
@@ -1888,7 +1917,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
             type="button"
             className="gsp-player-btn is-cta"
             onClick={openStudio}
-            disabled={!hasScore || status !== 'ready' || !playerReady}
+            disabled={!hasScore || status !== 'ready'}
             title={t('studio.openHint')}
           >
             <VideoIcon />
@@ -1906,7 +1935,7 @@ export function Player(props: { t?: Translate }): React.ReactElement {
             meta={meta}
             fileName={fileName}
             trackIndex={trackIndex}
-            layout={layout}
+            layout={studioLayout}
             notation={notation}
             external={external}
             studio={studio}
@@ -1919,9 +1948,10 @@ export function Player(props: { t?: Translate }): React.ReactElement {
             assetBase={assets.assetBase}
             scriptFile={assets.scriptFile}
             fontDirectory={assets.fontDirectory}
+            soundFontUrl={assets.soundfont}
             exportCodecSupported={exportCodecSupported}
             onStudioChange={setStudio}
-            onLayoutChange={applyLayout}
+            onLayoutChange={applyStudioLayout}
             onNotationChange={changeNotation}
             onTrackChange={changeTrack}
             onClose={closeStudio}

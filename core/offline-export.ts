@@ -180,6 +180,18 @@ export function buildTickSegments(api: AlphaTabApi, durationMs: number): TickSeg
   return segments;
 }
 
+/**
+ * Length of the score in milliseconds according to its own tempo map (the
+ * tempo automations of the master bars). This is the timeline used when a score
+ * has no embedded audio: it needs no player, only alphaTab's tick lookup, so the
+ * video workbench can be used before any sound has started.
+ */
+export function scoreTimelineMs(api: AlphaTabApi | null | undefined): number {
+  if (!api) return 0;
+  const segments = buildTickSegments(api, 0);
+  return segments.length > 0 ? segments[segments.length - 1].endTime : 0;
+}
+
 export function tickAtTime(segments: TickSegment[], time: number): number {
   if (segments.length === 0) return 0;
   let low = 0;
@@ -232,6 +244,92 @@ export function buildAudioTimeline(audio: OfflineAudioSource | null): AudioTimel
       return current.scoreMs + (next.scoreMs - current.scoreMs) * ratio;
     },
   };
+}
+
+/**
+ * Renders the score into a 16-bit stereo WAV with alphaTab's synthesizer.
+ *
+ * Scores without a backing track still get a soundtrack in the exported video:
+ * the audio is generated offline ("as fast as possible") at the tempo written
+ * in the score (`useSyncPoints: false`), so picture and sound follow the same
+ * timeline.
+ */
+export async function synthesizeScoreAudio(
+  api: AlphaTabApi,
+  soundFontUrl: string,
+  onProgress?: (ratio: number) => void,
+): Promise<{ bytes: Uint8Array; durationMs: number }> {
+  const soundFonts: Uint8Array[] = [];
+  try {
+    const response = await fetch(soundFontUrl);
+    if (response.ok) soundFonts.push(new Uint8Array(await response.arrayBuffer()));
+  } catch {
+    // Without a soundfont the synth still renders, just without instruments.
+  }
+  const expected = Math.max(1, scoreTimelineMs(api));
+  const exporter = await (api as any).exportAudio({
+    soundFonts,
+    sampleRate: AUDIO_RATE,
+    useSyncPoints: false,
+    masterVolume: 1,
+    metronomeVolume: 0,
+    trackVolume: new Map(),
+    trackTranspositionPitches: new Map(),
+  });
+  const chunks: Float32Array[] = [];
+  let renderedMs = 0;
+  try {
+    for (let guard = 0; guard < 1_000_000; guard += 1) {
+      const chunk = await exporter.render(4000);
+      if (!chunk) break;
+      chunks.push(chunk.samples);
+      renderedMs = Number(chunk.endTime) || renderedMs;
+      onProgress?.(Math.min(1, renderedMs / expected));
+    }
+  } finally {
+    try { exporter.destroy(); } catch { /* already destroyed */ }
+  }
+  if (chunks.length === 0) {
+    throw new OfflineExportError('The synthesizer returned no audio', 'export.midiAudioFailed');
+  }
+  const bytes = encodeWav(chunks, AUDIO_RATE, 2);
+  // Duration from the samples themselves: independent of rounding in the
+  // exported chunk metadata.
+  const frames = chunks.reduce((sum, chunk) => sum + chunk.length, 0) / 2;
+  return { bytes, durationMs: (frames / AUDIO_RATE) * 1000 };
+}
+
+/** Interleaved float samples -> 16-bit PCM WAV. */
+function encodeWav(chunks: Float32Array[], sampleRate: number, channels: number): Uint8Array {
+  const totalSamples = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const dataBytes = totalSamples * 2;
+  const bytes = new Uint8Array(44 + dataBytes);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i += 1) bytes[offset + i] = value.charCodeAt(i);
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * 2, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, dataBytes, true);
+  let offset = 44;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i += 1) {
+      const sample = Math.max(-1, Math.min(1, chunk[i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return bytes;
 }
 
 /** Decodes external audio and renders exactly the requested excerpt to PCM. */
@@ -457,6 +555,7 @@ export async function renderOfflineVideo(options: OfflineExportOptions): Promise
   let scrollY = 0;
   let scrollX = 0;
   let lastCursorPx: number | null = null;
+  let lastSystemTop: number | undefined;
   let leadVelocity = 0;
   const cursorSmoothingState = createCursorSmoothingState();
   const smoothingAmount = Math.min(1, Math.max(0, options.cursorStyle.smoothing ?? 0));
@@ -526,6 +625,11 @@ export async function renderOfflineVideo(options: OfflineExportOptions): Promise
         }
         scrollY = 0;
         lastCursorPx = cursorPx;
+      } else if (layout.singleLine) {
+        // Single-line page: the camera is pinned to the active line, so a line
+        // change is an instant cut - vertically and horizontally.
+        scrollY = targetScrollY;
+        scrollX = targetScrollX;
       } else if (frameIndex === 0) {
         scrollY = targetScrollY;
         scrollX = 0;
@@ -533,10 +637,12 @@ export async function renderOfflineVideo(options: OfflineExportOptions): Promise
         scrollY += (targetScrollY - scrollY) * verticalSmoothing;
         scrollX = 0;
       }
+      if (paintCursor) lastSystemTop = paintCursor.bounds.systemTop;
       paintVideoFrame(context, options.score, layout, {
         scrollY,
         scrollX,
         cursor: paintCursor,
+        systemTop: lastSystemTop,
         accent: options.accent,
         cursorStyle: options.cursorStyle,
         trackLabel: options.trackLabel,
