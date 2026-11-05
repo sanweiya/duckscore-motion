@@ -1,0 +1,56 @@
+/*
+ * Shell styles. The player ships its own CSS inside the component; this file
+ * only provides the full-window layout and the theme tokens the component
+ * normally inherits from the DSH host.
+ */
+:root {
+  color-scheme: light;
+
+  /* DSH theme tokens used by the shared component CSS. */
+  --dsw-alias-bg-base: #ffffff;
+  --dsw-alias-bg-layer-1: #f7f9fc;
+  --dsw-alias-bg-layer-2: #eef2f8;
+  --dsw-alias-bg-overlay: rgba(21, 38, 60, 0.42);
+  --dsw-alias-border-l1: #e3e9f1;
+  --dsw-alias-border-l2: #d6dfea;
+  --dsw-alias-label-primary: #1b2430;
+  --dsw-alias-label-secondary: #5e6d7e;
+  --dsw-alias-state-error-primary: #b3261e;
+  --dsw-alias-state-idle-primary: #8a97a6;
+  --dsw-alias-state-success-primary: #1f7a4d;
+
+  --gsp-shell-bg: #e9eff6;
+  --gsp-shell-ink: #1b2430;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--gsp-shell-bg);
+  color: var(--gsp-shell-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  min-height: 0;
+}
+
+/* The shared component is built for a sidebar pane; in a full window it simply
+   fills the viewport. */
+#root > .gsp-root {
+  flex: 1 1 auto;
+  min-width: 0;
+}

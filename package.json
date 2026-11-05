@@ -1,0 +1,25 @@
+{
+  "name": "gp-studio-standalone",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Guitar Pro score player and animated score video workbench (standalone web build).",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node scripts/serve.mjs",
+    "serve": "node scripts/serve.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@coderline/alphatab": "^1.9.0",
+    "mediabunny": "^1.65.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
+  }
+}
