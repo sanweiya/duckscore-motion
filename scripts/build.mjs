@@ -40,6 +40,9 @@ await build({
 
 await cp(path.join(appDir, 'index.html'), path.join(dist, 'index.html'));
 await cp(path.join(appDir, 'src/app.css'), path.join(dist, 'app.css'));
+// Site branding (favicon, logo). Swapping the logo is a file drop: index.html
+// references ./brand/favicon.svg, which resolves under any deploy sub-path.
+await cp(path.join(appDir, 'brand'), path.join(dist, 'brand'), { recursive: true });
 
 // alphaTab worker entry, SMuFL fonts and the Sonivox soundfont.
 await cp(path.join(vendorDir, 'alphaTab.mjs'), path.join(assets, 'alphaTab.mjs'));

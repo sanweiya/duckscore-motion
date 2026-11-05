@@ -14,6 +14,10 @@ npm run typecheck          # tsc --noEmit
 
 必须用 http 访问，不能用 `file://`。导出依赖 WebCodecs → Chrome / Edge。
 
+## 协作约定
+
+- **不要擅自推送到远程仓库**：除非用户明确同意，否则不要执行 `git push`，也不要自己配 remote、建远程仓库（`gh repo create … --push`）或开 PR。本地提交、构建、测试照做，任何远端动作先问。
+
 ## 结构
 
 - `core/index.tsx` — `Player` 组件 + `configureAssets()`
@@ -40,6 +44,13 @@ npm run typecheck          # tsc --noEmit
 - 设置存在 localStorage：`gp-score-player.layout.v1`（播放器排版）、`gp-score-player.studio.v1`（工作台画布 + 工作台排版）、`gp-score-player.export.v1`（导出参数）；无存档时用 `DEFAULT_*` 常量。改默认值只影响新用户。
 - 主题（白底/黑底）只改纸面、谱面与文字，游标颜色独立。
 - **署名**：alphaTab 的「♪ alphaTab.net」谱面署名必须保留可见，不得删除、遮挡、裁剪或改渲染结果（<https://alphatab.net/docs/attribution>）。表头/右下角的「Powered by alphaTab」是补充署名。
+
+## 品牌（网站标题 / logo）
+
+- **站点名只有一处**：`index.html` 的 `<title>` 与 `<meta name="description">`（`theme-color` 也在那里）。不要在 TS / i18n 里再写一份站点名，否则换标题要改多处。
+- **logo 是静态文件**：放在 `brand/`，`scripts/build.mjs` 整目录拷到 `dist/brand/`，`index.html` 用相对路径 `./brand/favicon.svg` 引用（Pages 子路径下同样有效）。换图标 = 覆盖 `brand/favicon.svg` 后重新构建，不用改代码；绘图要求见 `brand/README.md`。
+- 若之后要放词标/页内标记，优先放空状态 `.gsp-empty-icon` 或工作台顶栏 `.gsp-vs-top`，尺寸与主色参考 `--gsp-accent`（#436d9d）；深色主题（`.gsp-root.is-studio` 与黑底画布）需要能看清。
+- 任何 logo 都不能遮挡或替换 alphaTab 的「♪ alphaTab.net」署名（见下）。
 
 ## 打包 Electron（未做）
 

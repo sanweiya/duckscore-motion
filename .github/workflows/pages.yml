@@ -62,6 +62,7 @@ jobs:
         run: |
           set -eu
           for f in index.html app.js app.css \
+                   brand/favicon.svg \
                    assets/alphaTab.worker.js \
                    assets/soundfont/sonivox.sf2 \
                    assets/font/Bravura.woff2; do
