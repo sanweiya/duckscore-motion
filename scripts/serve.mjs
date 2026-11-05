@@ -90,7 +90,7 @@ const handler = async (req, res) => {
 
 const server = http.createServer(handler);
 server.listen(port, host, () => {
-  console.log(`GP Studio: http://${host}:${port}/`);
+  console.log(`Duck Score Motion: http://${host}:${port}/`);
 });
 
 if (tlsAvailable) {
@@ -99,7 +99,7 @@ if (tlsAvailable) {
     handler,
   );
   tlsServer.listen(tlsPort, host, () => {
-    console.log(`GP Studio (secure, export works): https://${host}:${tlsPort}/`);
+    console.log(`Duck Score Motion (secure, export works): https://${host}:${tlsPort}/`);
     console.log('The certificate is self-signed: accept the browser warning once.');
   });
 } else if (tlsPort > 0) {

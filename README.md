@@ -1,6 +1,6 @@
-# GP Studio（独立网页版）
+# Duck Score Motion（独立网页版）
 
-Guitar Pro 乐谱播放器 + 视频工作台。这是一个**自包含**目录：不依赖任何上级仓库。
+Guitar Pro / MusicXML 乐谱播放器 + 动态曲谱视频工作台。这是一个**自包含**目录：不依赖任何上级仓库。
 
 ## 运行
 

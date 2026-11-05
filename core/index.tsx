@@ -259,6 +259,17 @@ export function Player(props: { t?: Translate }): React.ReactElement {
   const [loop, setLoop] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
+  // Brand mark for the empty state. It is a static file next to the assets
+  // (`brand/logo.svg`), so it resolves under any deploy sub-path; hosts that do
+  // not ship it simply keep the built-in note icon via `onError`.
+  const brandLogoUrl = (() => {
+    try {
+      return new URL('../brand/logo.svg', assets.assetBase).href;
+    } catch {
+      return '';
+    }
+  })();
+  const [brandLogoFailed, setBrandLogoFailed] = useState(false);
   const [external, setExternal] = useState<ExternalMedia | null>(null);
   const [offsetSec, setOffsetSec] = useState(0);
   const [dragActive, setDragActive] = useState(false);
@@ -1317,7 +1328,18 @@ export function Player(props: { t?: Translate }): React.ReactElement {
         <div className="gsp-score-scroll" ref={scrollRef}>
           {!hasScore ? (
             <div className={`gsp-empty ${dragActive ? 'is-drag' : ''}`}>
-              <div className="gsp-empty-icon"><MusicIcon /></div>
+              {brandLogoUrl && !brandLogoFailed ? (
+                <div className="gsp-empty-icon has-logo">
+                  <img
+                    src={brandLogoUrl}
+                    alt=""
+                    draggable={false}
+                    onError={() => setBrandLogoFailed(true)}
+                  />
+                </div>
+              ) : (
+                <div className="gsp-empty-icon"><MusicIcon /></div>
+              )}
               <h3>{dragActive ? t('empty.drag') : t('empty.title')}</h3>
               <p>{t('empty.hint')}</p>
               <div className="gsp-empty-actions">

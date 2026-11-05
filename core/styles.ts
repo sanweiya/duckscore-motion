@@ -211,6 +211,15 @@ export const CSS = `
   background: color-mix(in srgb, var(--gsp-accent) 7%, #fff); border: 1px solid color-mix(in srgb, var(--gsp-accent) 20%, transparent);
   color: var(--gsp-accent); box-shadow: 0 8px 24px rgba(67,109,157,.10);
 }
+/* Brand mark: the pick icon carries its own shape, so the tile chrome is
+   dropped and only a soft shadow keeps it sitting on the paper. */
+.gsp-empty-icon.has-logo {
+  width: 78px; height: 78px; border: 0; border-radius: 0; background: none; box-shadow: none;
+}
+.gsp-empty-icon.has-logo img {
+  display: block; width: 100%; height: 100%;
+  filter: drop-shadow(0 12px 24px rgba(31,58,88,.18));
+}
 .gsp-empty h3 { margin: 2px 0 0; color: #243447; font-size: 15px; }
 .gsp-empty p { margin: 0; max-width: 300px; font-size: 12px; line-height: 1.55; }
 .gsp-empty .gsp-chip { background: rgba(67,109,157,.09); color: #5f6d7c; }
