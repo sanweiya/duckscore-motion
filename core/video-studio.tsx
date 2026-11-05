@@ -1271,7 +1271,10 @@ export function VideoStudio(props: VideoStudioProps): any {
                     />
                   </div>
                   <div className="gsp-field">
-                    <label htmlFor="gsp-vs-cursor-width">{t('studio.cursorWidth')}</label>
+                    <label htmlFor="gsp-vs-cursor-width">
+                      {t('studio.cursorWidth')}
+                      <span className="gsp-help" title={t('studio.cursorHint')} aria-label={t('studio.cursorHint')} tabIndex={0}>!</span>
+                    </label>
                     <div className="gsp-inline">
                       <input
                         id="gsp-vs-cursor-width"
@@ -1345,7 +1348,10 @@ export function VideoStudio(props: VideoStudioProps): any {
                     </div>
                   </div>
                   <div className="gsp-field">
-                    <label htmlFor="gsp-vs-cursor-smoothing">{t('studio.cursorSmoothing')}</label>
+                    <label htmlFor="gsp-vs-cursor-smoothing">
+                      {t('studio.cursorSmoothing')}
+                      <span className="gsp-help" title={t('studio.cursorSmoothingHint')} aria-label={t('studio.cursorSmoothingHint')} tabIndex={0}>!</span>
+                    </label>
                     <div className="gsp-inline">
                       <input
                         id="gsp-vs-cursor-smoothing"
@@ -1360,7 +1366,10 @@ export function VideoStudio(props: VideoStudioProps): any {
                     </div>
                   </div>
                   <div className="gsp-field">
-                    <label>{t('studio.cursorLookahead')}</label>
+                    <label>
+                      {t('studio.cursorLookahead')}
+                      <span className="gsp-help" title={t('studio.cursorLookaheadHint')} aria-label={t('studio.cursorLookaheadHint')} tabIndex={0}>!</span>
+                    </label>
                     <div className="gsp-seg gsp-vs-seg">
                       {(['off', 'conservative', 'normal', 'aggressive'] as const).map((mode) => (
                         <button
@@ -1374,8 +1383,7 @@ export function VideoStudio(props: VideoStudioProps): any {
                       ))}
                     </div>
                   </div>
-                  <p className="gsp-hint">{t('studio.cursorSmoothingHint')}</p>
-                  <p className="gsp-hint">{t('studio.cursorHint')}</p>
+
                 </section>
 
                 <section className="gsp-group">

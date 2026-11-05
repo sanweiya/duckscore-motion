@@ -543,8 +543,19 @@ export const CSS = `
 .gsp-vs-fieldset:disabled { opacity: .62; }
 .gsp-vs-side-body { height: 100%; overflow-y: auto; padding: 3px 12px 16px; scrollbar-width: thin; }
 .gsp-vs-side .gsp-group { padding: 9px 0 10px; }
-.gsp-vs-side .gsp-field { grid-template-columns: 75px minmax(0, 1fr); gap: 7px; margin: 7px 0; }
+.gsp-vs-side .gsp-field { grid-template-columns: 92px minmax(0, 1fr); gap: 7px; margin: 7px 0; }
+/* Label + optional "!" badge stay on one line even for the longest label. */
+.gsp-vs-side .gsp-field > label { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .gsp-vs-side .gsp-field > label { font-size: 10.5px; }
+/* Long control explanations live in a hover/focus tooltip instead of a paragraph:
+   the side panel keeps its density and the text is still one gesture away. */
+.gsp-help {
+  flex: none; display: inline-grid; place-items: center; width: 13px; height: 13px;
+  border-radius: 50%; border: 1px solid currentColor;
+  font-size: 9px; font-weight: 700; line-height: 1; letter-spacing: 0;
+  opacity: .55; cursor: help; user-select: none;
+}
+.gsp-help:hover, .gsp-help:focus-visible { opacity: 1; background: rgba(67, 109, 157, .14); outline: none; }
 .gsp-vs-side .gsp-check { font-size: 11px; }
 .gsp-vs-check { display: flex; margin: 8px 0; }
 .gsp-vs-ratio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
