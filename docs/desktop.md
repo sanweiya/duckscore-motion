@@ -32,7 +32,9 @@ npm run desktop:build  # 构建 dist/ + 打包 Linux 安装器到 release/
 ## 壳的实现（`desktop/main.cjs`，CommonJS，不用 preload/IPC）
 
 - **http origin 而不是 `file://`，也不是自定义协议**：启动时把 `dist/` 提供
-  的静态服务挂在 `127.0.0.1` 的**临时端口**上（和 `npm run serve` 不会撞端口）。
+  的静态服务挂在 `127.0.0.1` 的**固定端口 45837**（与 `npm run serve` 的 4173 不撞）。
+  localStorage 按来源隔离，端口每次都换会清空设置记忆，因此端口必须稳定；
+  被占用时降级为临时端口并打日志（仅该会话不保留设置）。
   `http://127.0.0.1` 即 secure context → WebCodecs / Worker / 音色库 fetch
   与网页版行为一致；也避开 Tauri 那类「自定义协议下 blob worker `importScripts` 被拒」的坑。
   静态处理逻辑与 CLI 共用 `scripts/static-server.cjs`，勿复制两份。

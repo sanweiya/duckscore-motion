@@ -45,13 +45,46 @@ if (!gotLock) {
   });
 }
 
+/**
+ * Local storage (the three 'memory' keys: player layout / studio layout /
+ * export settings) is scoped per origin (protocol + host + port) in Chromium.
+ * With an ephemeral port every launch is a brand-new origin and NOTHING would
+ * be remembered across desktop launches - so listen on a stable port. The app
+ * enforces a single instance, and `npm run serve` uses 4173, so clashes are
+ * rare; if the port is taken we fall back to an ephemeral one (settings just
+ * won't persist during that session) and log it.
+ */
+const INTERNAL_PORT = 45837;
+
+function listen(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once('error', onError);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+}
+
 async function startServer() {
   server = createStaticServer(distDir);
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve); // ephemeral port: no clash with `npm run serve`
-  });
-  return server.address().port;
+  let port;
+  let persistent = true;
+  try {
+    await listen(server, INTERNAL_PORT);
+    port = INTERNAL_PORT;
+  } catch (error) {
+    log(`port ${INTERNAL_PORT} busy (${error?.code ?? error}), using fallback: persistence off this session`);
+    persistent = false;
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+    });
+    await listen(server, 0);
+    port = server.address().port;
+  }
+  // Keep in mind for diagnostics: an ephemeral port erases the app's settings
+  // memory for this run only; nothing else keys off the port.
+  if (persistent) log(`internal origin: http://127.0.0.1:${port}/`);
+  else log(`internal origin: http://127.0.0.1:${port}/ (ephemeral)`);
+  return port;
 }
 
 /**
