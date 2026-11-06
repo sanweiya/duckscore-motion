@@ -4,12 +4,18 @@
   "private": true,
   "type": "module",
   "description": "Guitar Pro score player and animated score video workbench (standalone web build).",
+  "main": "desktop/main.cjs",
+  "desktopName": "duckscore-motion.desktop",
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && node scripts/serve.mjs",
     "serve": "node scripts/serve.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "desktop": "npm run build && electron .",
+    "desktop:run": "electron .",
+    "desktop:build": "npm run build && electron-builder --linux"
   },
+  "author": "X. Chen <31515081+sanweiya@users.noreply.github.com>",
   "dependencies": {
     "@coderline/alphatab": "^1.9.0",
     "mediabunny": "^1.65.2",
@@ -19,7 +25,13 @@
   "devDependencies": {
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.25.12",
     "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "electron@45.2.3": true,
+    "electron-builder@26.18.0": true
   }
 }

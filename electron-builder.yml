@@ -1,0 +1,33 @@
+# Electron packaging config.
+#
+# Payload = the same `dist/` the web version deploys (one web build, two
+# targets, see docs/desktop.md). Nothing from node_modules is bundled:
+# `desktop/main.cjs` requires only Node built-ins and `scripts/static-server.cjs`,
+# so the file list is hand-picked instead of relying on the dependency walker.
+appId: io.github.sanweiya.duckscoremotion
+productName: Duck Score Motion
+directories:
+  buildResources: brand
+  output: release
+files:
+  - dist/**/*
+  - desktop/**/*
+  - scripts/static-server.cjs
+asar: true
+# Linux first (the dev machine); Windows/macOS targets are cross-built from CI
+# later and would need code signing, so they are deliberately absent for now.
+linux:
+  category: Audio
+  # Sync the .desktop entry's StartupWMClass/WM_CLASS with it so running
+  # windows get associated with the launcher icon (electron-builder suggestion).
+  syncDesktopName: true
+  icon: brand/icon-512.png
+  # deb demands a maintainer; reuse the GitHub identity used for commits.
+  maintainer: X. Chen <31515081+sanweiya@users.noreply.github.com>
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64

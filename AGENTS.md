@@ -11,6 +11,8 @@ npm start        # 构建 + 起服务 → http://127.0.0.1:4173/
 npm run build    # 只构建到 dist/
 npm run serve    # 只起服务（需先 build）
 npm run typecheck
+npm run desktop  # 构建 dist/ + Electron 窗口（桌面版调试）
+npm run desktop:build  # 桌面安装器（Linux: AppImage/deb → release/）
 ```
 
 必须走 http(s)，不能 `file://`（worker / fetch 会被拦）。导出依赖 WebCodecs → Chrome / Edge。
@@ -30,8 +32,9 @@ npm run typecheck
 |---|---|
 | `core/` | 全部业务代码；**改之前先读 `core/AGENTS.md`** |
 | `src/main.ts` | 外壳：React 绑定 / 语言 / 资源路径（唯一与宿主相关） |
+| `desktop/` | Electron 壳，只当宿主不塞业务；网页版与桌面版共用 `dist/`，见 `docs/desktop.md` |
 | `brand/` | 图标与 logo（构建时拷到 `dist/brand/`），规格见 `brand/README.md` |
-| `scripts/` | `build.mjs`（esbuild + 拷资源）、`serve.mjs`（零依赖静态服务，可选 HTTPS） |
+| `scripts/` | `build.mjs`（esbuild + 拷资源）、`serve.mjs`（静态服务）、`static-server.cjs`（CLI 与桌面壳共用的处理逻辑） |
 | `docs/` | 打包、部署等长文档 |
 | `.github/workflows/pages.yml` | GitHub Pages 构建与部署 |
 
@@ -53,6 +56,6 @@ npm run typecheck
 | 谱面渲染、排版、相机、游标 | `core/AGENTS.md` |
 | 工作台侧栏、设置解耦、i18n、主题 | `core/AGENTS.md` |
 | 音频合成、WebCodecs 导出 | `core/AGENTS.md` |
-| Electron / Tauri 打包评估 | `docs/desktop.md` |
+| Electron 桌面版：壳实现、打包、大陆镜像 | `docs/desktop.md` |
 | GitHub Pages 部署与缓存 | `docs/deploy.md` |
 | 图标 / logo 规格 | `brand/README.md` |
