@@ -25,4 +25,4 @@ scripts/build.mjs  esbuild 打包 + 复制 vendor → dist/
 scripts/serve.mjs  零依赖静态服务器
 ```
 
-更多说明见 `AGENTS.md`。
+更多说明见 `AGENTS.md`（业务代码约束在 `core/AGENTS.md`，打包/部署见 `docs/`）。
