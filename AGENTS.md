@@ -16,7 +16,13 @@ npm run typecheck          # tsc --noEmit
 
 ## 协作约定
 
-- **不要擅自推送到远程仓库**：除非用户明确同意，否则不要执行 `git push`，也不要自己配 remote、建远程仓库（`gh repo create … --push`）或开 PR。本地提交、构建、测试照做，任何远端动作先问。
+- **远端写操作必须逐项获得用户的明确同意，不允许从别的指令推断。** 下列动作一律先问、得到“推送 / 发布 / 上线”这类明确答复才执行：
+  - `git push`（哪怕只有 1 个提交）、`git remote add/set-url`、`gh repo create`、开或改 PR、发 tag / release；
+  - 改仓库设置：visibility、homepage、description、topics、默认分支、Pages 源、Actions secrets；
+  - 任何会触发部署的操作。
+  反例（真实踩过）：用户说“修一下图标 / 不要在 README 写网址”，不等于“可以再推一次”。
+- **用户可能攒多次提交再一起推**，所以默认只做本地提交；每次收尾报告「待推送：N 个提交（摘要）+ 推送后会触发几次部署」，不自行推送。
+- 本地动作（改代码、typecheck、build、本地提交、起本地服务、跑测试）不需要逐次确认。
 
 ## 结构
 
