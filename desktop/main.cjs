@@ -13,7 +13,8 @@
 'use strict';
 
 const path = require('node:path');
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const fs = require('node:fs');
+const { app, BrowserWindow, Menu, dialog, shell, screen } = require('electron');
 const { createStaticServer } = require('../scripts/static-server.cjs');const appDir = path.resolve(__dirname, '..');
 const isDev = !app.isPackaged;
 // Works both unpacked and inside the asar: dev → <repo>/dist, packaged →
@@ -85,6 +86,54 @@ function wireSaveDialog(webContents) {
   });
 }
 
+/**
+ * Window geometry memory (userData/window-state.json).
+ *
+ * Fixed pixel sizes are dangerous on HiDPI: the user's 2880x1800 panel runs a
+ * 2x scale, so an 860-tall window fills the whole vertical screen. Defaults are
+ * derived from the logical work area instead, and the last bounds are reused.
+ */
+const STATE_FILE = () => path.join(app.getPath('userData'), 'window-state.json');
+
+function defaultBounds() {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  return {
+    width: Math.min(1200, Math.round(workAreaSize.width * 0.82)),
+    height: Math.min(780, Math.round(workAreaSize.height * 0.8)),
+  };
+}
+
+function loadBounds() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    const { workArea } = screen.getPrimaryDisplay();
+    const width = Math.min(saved.width ?? defaultBounds().width, workArea.width);
+    const height = Math.min(saved.height ?? defaultBounds().height, workArea.height);
+    return {
+      width,
+      height,
+      x: Math.min(Math.max(saved.x ?? 0, workArea.x), Math.max(workArea.x, workArea.x + workArea.width - width)),
+      y: Math.min(Math.max(saved.y ?? 0, workArea.y), Math.max(workArea.y, workArea.y + workArea.height - height)),
+      maximized: !!saved.maximized,
+    };
+  } catch {
+    const fallback = defaultBounds();
+    return { ...fallback, x: undefined, y: undefined, maximized: false };
+  }
+}
+
+function persistState() {
+  if (!win || win.isDestroyed()) return;
+  try {
+    fs.writeFileSync(STATE_FILE(), JSON.stringify({
+      ...win.getNormalBounds(),
+      maximized: win.isMaximized(),
+    }, null, 1));
+  } catch (error) {
+log(`persist window state failed: ${error?.message ?? error}`);
+  }
+}
+
 async function createWindow() {
   let port;
   try {
@@ -95,11 +144,11 @@ async function createWindow() {
     return;
   }
 
+  const bounds = loadBounds();
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 900,
-    minHeight: 600,
+    ...bounds,
+    minWidth: 720,
+    minHeight: 560,
     show: false,
     backgroundColor: '#f3f8fd',
     autoHideMenuBar: true,
@@ -111,6 +160,7 @@ async function createWindow() {
       sandbox: true,
     },
   });
+  if (bounds.maximized && !isDev) win.maximize();
 
   if (!isDev) Menu.setApplicationMenu(null); // plain app window; F12 toggle below in dev
 
@@ -131,6 +181,7 @@ async function createWindow() {
 
   wireSaveDialog(win.webContents);
   win.once('ready-to-show', () => win.show());
+  win.on('close', () => persistState());
   win.on('closed', () => {
     win = null;
   });

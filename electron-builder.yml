@@ -17,7 +17,9 @@ asar: true
 # Linux first (the dev machine); Windows/macOS targets are cross-built from CI
 # later and would need code signing, so they are deliberately absent for now.
 linux:
-  category: Audio
+  # Cinnamon/GNOME menus only show main XDG categories; `Audio` is a related one
+  # and lands under 其他. AudioVideo = 影音/多媒体 in the menu.
+  category: AudioVideo
   # Sync the .desktop entry's StartupWMClass/WM_CLASS with it so running
   # windows get associated with the launcher icon (electron-builder suggestion).
   syncDesktopName: true
@@ -31,3 +33,6 @@ linux:
     - target: deb
       arch:
         - x64
+  # Refresh desktop/icon caches right after installation (see the script).
+deb:
+  afterInstall: scripts/deb-postinst.sh
