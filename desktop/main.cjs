@@ -65,6 +65,12 @@ function listen(server, port) {
 }
 
 async function startServer() {
+  // macOS keeps the process alive after the last window closes; re-creating the
+  // window must reuse the running listener. Binding the same port a second time
+  // would fail and silently drop the session to an ephemeral origin (i.e. lose
+  // the remembered settings), so reuse before creating a new server.
+  if (server && server.listening) return server.address().port;
+
   server = createStaticServer(distDir);
   let port;
   let persistent = true;
@@ -195,7 +201,16 @@ async function createWindow() {
   });
   if (bounds.maximized && !isDev) win.maximize();
 
-  if (!isDev) Menu.setApplicationMenu(null); // plain app window; F12 toggle below in dev
+  if (!isDev) {
+    // macOS resolves Cmd+Q / Cmd+W and the Edit roles (Cmd+C / Cmd+V) through
+    // the application menu: with no menu those shortcuts silently stop working.
+    // Windows/Linux keep the plain menu-less window (F12 toggle below in dev).
+    Menu.setApplicationMenu(
+      process.platform === 'darwin'
+        ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }])
+        : null,
+    );
+  }
 
   if (isDev) {
     win.webContents.on('before-input-event', (_event, input) => {
@@ -248,6 +263,11 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // macOS convention: the app (and its internal server) stays alive, and the
+  // activate handler above re-creates the window from the dock icon.
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
   if (server) server.close();
-  app.quit(); // Windows/Linux convention; not status-bar style
 });

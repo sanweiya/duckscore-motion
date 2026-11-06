@@ -9,7 +9,7 @@ npm install
 npm start          # 构建 + 起本地服务，默认 http://127.0.0.1:4173/
 PORT=5173 npm start
 npm run desktop    # 桌面版窗口（Electron，同一份 dist/）
-npm run desktop:build  # 打包桌面安装器（Linux: deb）
+npm run desktop:build  # 打包桌面安装器（当前平台：deb / exe / dmg）
 ```
 
 用 Chrome / Edge 打开输出的地址。**必须通过 http 访问**，不要双击 `index.html`
@@ -26,7 +26,8 @@ vendor/            alphaTab worker/core、SMuFL 字体、Sonivox 音色库、官
 scripts/build.mjs  esbuild 打包 + 复制 vendor → dist/
 scripts/serve.mjs  零依赖静态服务器
 desktop/main.cjs   Electron 壳：本地 http 宿主 dist/，网页版与桌面版共用产物
-electron-builder.yml  桌面打包配置（Linux 实测；Windows/macOS 走 CI 补）
+electron-builder.yml  桌面打包配置（三平台：Linux deb / Windows exe / macOS dmg）
+build/             桌面安装包图标（ico/icns/多尺寸 png），见 docs/desktop.md
 ```
 
 更多说明见 `AGENTS.md`（业务代码约束在 `core/AGENTS.md`，打包/部署见 `docs/`）。

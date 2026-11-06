@@ -1,0 +1,13 @@
+# Normalize line endings. Without this a Windows clone (core.autocrlf=true)
+# rewrites every text file on checkout and turns the .sh scripts into CRLF.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Binary assets: leave byte-for-byte alone.
+*.png binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.otf binary
+*.sf2 binary

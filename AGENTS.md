@@ -12,7 +12,7 @@ npm run build    # 只构建到 dist/
 npm run serve    # 只起服务（需先 build）
 npm run typecheck
 npm run desktop  # 构建 dist/ + Electron 窗口（桌面版调试）
-npm run desktop:build  # 桌面安装器（Linux: deb → release/，不再出 AppImage）
+npm run desktop:build  # 当前平台的安装器 → release/（Linux deb / Windows exe / macOS dmg）
 ```
 
 必须走 http(s)，不能 `file://`（worker / fetch 会被拦）。导出依赖 WebCodecs → Chrome / Edge。
@@ -34,6 +34,7 @@ npm run desktop:build  # 桌面安装器（Linux: deb → release/，不再出 A
 | `src/main.ts` | 外壳：React 绑定 / 语言 / 资源路径（唯一与宿主相关） |
 | `desktop/` | Electron 壳，只当宿主不塞业务；网页版与桌面版共用 `dist/`，见 `docs/desktop.md` |
 | `brand/` | 图标与 logo（构建时拷到 `dist/brand/`），规格见 `brand/README.md` |
+| `build/` | 桌面安装包图标（ico/icns/多尺寸 png），不进 `dist/`；同见 `brand/README.md` |
 | `scripts/` | `build.mjs`（esbuild + 拷资源）、`serve.mjs`（静态服务）、`static-server.cjs`（CLI 与桌面壳共用的处理逻辑） |
 | `docs/` | 打包、部署等长文档 |
 | `.github/workflows/pages.yml` | GitHub Pages 构建与部署 |
@@ -47,6 +48,8 @@ npm run desktop:build  # 桌面安装器（Linux: deb → release/，不再出 A
 - localStorage 三件套：`gp-score-player.layout.v1` / `.studio.v1` / `.export.v1`。
   **改 key 会丢用户设置**，要改就得写迁移。
 - 站点名只有一处：`index.html` 的 `<title>` + `<meta name="description">`。
+- `electron-builder.yml` 的平台段（`linux` / `win` / `mac`）是**加法**：改一个平台
+  不许删另一个；`linux` 是当前正在分发的路径，Windows/macOS 段让对应宿主能自建。
 - 默认只做本地提交；推送 / 发布 / 改仓库设置都要逐项确认（见上）。
 
 ## 深入阅读

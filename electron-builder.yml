@@ -4,18 +4,25 @@
 # targets, see docs/desktop.md). Nothing from node_modules is bundled:
 # `desktop/main.cjs` requires only Node built-ins and `scripts/static-server.cjs`,
 # so the file list is hand-picked instead of relying on the dependency walker.
+#
+# Platform blocks are additive. `linux` is what the maintainer ships today;
+# `win` / `mac` exist so a clone on those machines can build an installer for
+# itself. When changing one platform, do not delete the others.
 appId: io.github.sanweiya.duckscoremotion
 productName: Duck Score Motion
 directories:
-  buildResources: brand
+  # Desktop-only build assets (icon sets). Kept out of `brand/` so the web
+  # payload does not carry them. See brand/README.md for how they are made.
+  buildResources: build
   output: release
 files:
   - dist/**/*
   - desktop/**/*
   - scripts/static-server.cjs
 asar: true
-# Linux first (the dev machine); Windows/macOS targets are cross-built from CI
-# later and would need code signing, so they are deliberately absent for now.
+
+# Linux (maintainer's machine): deb only. AppImage is not used, so it is not
+# built by default (add a target back here if that ever changes).
 linux:
   # Cinnamon/GNOME menus only show main XDG categories; `Audio` is a related one
   # and lands under 其他. AudioVideo = 影音/多媒体 in the menu.
@@ -23,15 +30,41 @@ linux:
   # Sync the .desktop entry's StartupWMClass/WM_CLASS with it so running
   # windows get associated with the launcher icon (electron-builder suggestion).
   syncDesktopName: true
-  icon: brand/icon-512.png
+  # Directory of per-size PNGs: small sizes come from the simplified favicon
+  # artwork, large ones from the full logo (see brand/README.md).
+  icon: build/icons
   # deb demands a maintainer; reuse the GitHub identity used for commits.
   maintainer: X. Chen <31515081+sanweiya@users.noreply.github.com>
   target:
-    # The maintainer's Linux box installs the deb; AppImage is not used, so it
-    # is not built by default (add a target back here if that ever changes).
     - target: deb
       arch:
         - x64
-  # Refresh desktop/icon caches right after installation (see the script).
+# Refresh desktop/icon caches right after installation (see the script).
 deb:
   afterInstall: scripts/deb-postinst.sh
+
+# Windows: NSIS installer, current architecture (x64 unless `--arm64`).
+# ICO is pre-built with 16–256 px entries (small sizes from favicon.svg).
+# Unsigned builds trigger SmartScreen on other machines; local use is fine.
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+  artifactName: ${name}-${version}-setup-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Duck Score Motion
+
+# macOS: dmg for the current architecture (Apple Silicon → arm64, Intel → x64;
+# pass `--x64` / `--arm64` to build the other one). ICNS is pre-built with
+# 16–1024 px entries. Local unsigned builds open after right-click → Open; only
+# distribute with Developer ID + notarization.
+mac:
+  icon: build/icon.icns
+  category: public.app-category.music
+  target:
+    - target: dmg
+  artifactName: ${name}-${version}-${arch}.${ext}

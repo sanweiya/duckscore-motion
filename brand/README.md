@@ -21,9 +21,32 @@
 1. 覆盖 `logo.svg`（完整版）与 `favicon.svg`（精简版），重新 `npm run build`；
    PNG 兜底图按同样尺寸重出（`favicon-32.png` 32×32、`apple-touch-icon.png` 180×180
    不透明、`icon-512.png` 512×512）。
+2. 按上节重出 `build/` 下的桌面图标（ico / icns / 多尺寸 png），否则安装包还是旧图。
 2. 要换网站标题，只改 `index.html` 的 `<title>` 与 `<meta name="description">`——
    站点名**只有这一处**，不要在 TS/i18n 里再写一份。
 3. 站点名已统一为 `Duck Score Motion`（见 `AGENTS.md` 的命名一节）。
+
+## 桌面打包图标（仓库根的 `build/`）
+
+桌面安装包的图标跟着上面两个 SVG 走，但**按尺寸分段取源**：小尺寸用
+`favicon.svg`（无投影、描边粗、鸭子放大，缩到 16px 仍可辨认），大尺寸用
+`logo.svg`（完整插画）。放在 `build/` 而不是本目录，是为了不让网页构建把这
+几百 KB 拷进 `dist/`。
+
+| 文件 | 来源 | 用途 |
+|---|---|---|
+| `build/icons/16x16.png` … `128x128.png` | `favicon.svg` | 小尺寸（Linux hicolor、ico/icns 小槽位） |
+| `build/icons/256x256.png` … `1024x1024.png` | `logo.svg` | 大尺寸（Linux、ico/icns 大槽位） |
+| `build/icon.ico` | 上两行混合 | Windows 安装包（16–256，七个尺寸） |
+| `build/icon.icns` | 上两行混合 | macOS 安装包（16–1024，`icp4…ic10`） |
+
+这些是**已提交的静态资产**，只在换 logo 时重出：用 librsvg 渲染（本机可走
+ffmpeg 的 `librsvg` 解码器——把 SVG 的 `width`/`height` 换成目标像素、`viewBox`
+保持不变），再用 Pillow 之类把各尺寸打包成 ico/icns。`electron-builder` 对
+`.ico`/`.icns` 是原样使用、不再转换，所以两个源各管一段尺寸才有效。
+
+**不要用 `icon-512.png` 上采样当大图标**：小尺寸会糊，`favicon.svg` 存在的
+意义就是给这些槽位。
 
 ## 绘制约定
 
