@@ -12,7 +12,7 @@ npm run build    # 只构建到 dist/
 npm run serve    # 只起服务（需先 build）
 npm run typecheck
 npm run desktop  # 构建 dist/ + Electron 窗口（桌面版调试）
-npm run desktop:build  # 桌面安装器（Linux: AppImage/deb → release/）
+npm run desktop:build  # 桌面安装器（Linux: deb → release/，不再出 AppImage）
 ```
 
 必须走 http(s)，不能 `file://`（worker / fetch 会被拦）。导出依赖 WebCodecs → Chrome / Edge。

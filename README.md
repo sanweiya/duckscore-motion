@@ -9,7 +9,7 @@ npm install
 npm start          # 构建 + 起本地服务，默认 http://127.0.0.1:4173/
 PORT=5173 npm start
 npm run desktop    # 桌面版窗口（Electron，同一份 dist/）
-npm run desktop:build  # 打包桌面安装器（Linux: AppImage / deb）
+npm run desktop:build  # 打包桌面安装器（Linux: deb）
 ```
 
 用 Chrome / Edge 打开输出的地址。**必须通过 http 访问**，不要双击 `index.html`

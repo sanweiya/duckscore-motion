@@ -27,9 +27,8 @@ linux:
   # deb demands a maintainer; reuse the GitHub identity used for commits.
   maintainer: X. Chen <31515081+sanweiya@users.noreply.github.com>
   target:
-    - target: AppImage
-      arch:
-        - x64
+    # The maintainer's Linux box installs the deb; AppImage is not used, so it
+    # is not built by default (add a target back here if that ever changes).
     - target: deb
       arch:
         - x64

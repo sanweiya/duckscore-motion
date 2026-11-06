@@ -26,8 +26,9 @@ npm run desktop        # 重新构建 dist/ + 启动（日常调试桌面版）
 npm run desktop:build  # 构建 dist/ + 打包 Linux 安装器到 release/
 ```
 
-产物（v0.1.0, x64）：`release/Duck Score Motion-0.1.0.AppImage`（134 MB）、
-`duckscore-motion_0.1.0_amd64.deb`（107 MB）。体积几乎全是 Chromium，与项目代码无关。
+产物（v0.1.0, x64, Linux）：`release/duckscore-motion_0.1.0_amd64.deb`（107 MB）。
+只出 deb——维护者的机器用 deb 安装，AppImage 不用、默认不构建（体积几乎全是
+Chromium，与项目代码无关；要 AppImage 时在 `electron-builder.yml` 的 target 里加回）。
 
 ## 壳的实现（`desktop/main.cjs`，CommonJS，不用 preload/IPC）
 
@@ -62,7 +63,7 @@ npm run desktop:build  # 构建 dist/ + 打包 Linux 安装器到 release/
   `~/.config/Duck Score Motion/`。key 沿用网页版，**改名仍会丢桌面用户设置**。
 - 单实例锁；生产窗口无菜单栏，开发模式 F12/Ctrl+Shift+I 开 DevTools。
 - 窗口图标取 `dist/brand/icon-512.png`；打包由 `electron-builder.yml`
-  负责（AppImage + deb，`syncDesktopName` 保证任务栏图标关联）。
+  负责（deb，`syncDesktopName` 保证任务栏图标关联）。
 
 ## 大陆构建环境备忘
 
@@ -80,7 +81,7 @@ npm run desktop:build
 
 ## 以后要做的（按需）
 
-- **Windows/macOS**：加 GitHub Actions job 交叉打包（`.AppImage/.deb/.exe/.dmg`）；
+- **Windows/macOS**：加 GitHub Actions job 交叉打包（`.deb/.exe/.dmg`）；
   macOS 需要 Apple 开发者账号做签名与公证，否则用户要手动放行 Gatekeeper。
 - 自动更新（electron-updater）：等有真实用户再说，最新版检测文件 `latest-linux.yml` 已随产物生成。
 - Tauri 想再试的话：体积 8–12 MB 很诱人，但 macOS 无 VP9 编码、Linux WebKitGTK
