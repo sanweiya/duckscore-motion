@@ -58,51 +58,30 @@ async function startServer() {
  * (which would dump files into ~/Downloads without asking).
  * `GSP_AUTO_SAVE=/abs/path` skips the dialog (used by automated tests).
  */
-const showSaveDialogSync = dialog.showSaveDialogSync.bind(dialog);
-
-/** Show the native save dialog for a download item (counted + logged). */
-function askSavePath(item) {
-  const seq = askSavePath.seq ??= 0;
-  askSavePath.seq = seq + 1;
-  // eslint-disable-next-line no-console
-  console.log(`[desktop] dialog #${seq + 1} open for item=${item.id ?? '?'}`);
-  const filePath = showSaveDialogSync(win, {
-    title: '保存导出文件',
-    defaultPath: item.getFilename(),
-  });
-  // eslint-disable-next-line no-console
-  console.log(`[desktop] dialog #${seq + 1} -> ${filePath ?? 'cancelled'}`);
-  return filePath;
-}
-
 function wireSaveDialog(webContents) {
   if (process.env.GSP_NO_WIRE) {
-    // eslint-disable-next-line no-console
-    console.log('[desktop] will-download wiring disabled for diagnosis');
+    log('will-download wiring disabled for diagnosis');
     webContents.session.on('will-download', (event, item) => {
-      // eslint-disable-next-line no-console
-      console.log(`[desktop] observed download ${item.getURL().slice(0, 64)} (${item.getFilename()})`);
+      log(`observed download ${item.getURL().slice(0, 64)} (${item.getFilename()})`);
     });
     return;
   }
   webContents.session.on('will-download', (event, item) => {
     // eslint-disable-next-line no-console
-    console.log(`[desktop] will-download url=${item.getURL().slice(0, 96)} id=${item.id ?? '?'}`);
+    log(`will-download url=${item.getURL().slice(0, 96)} id=${item.id ?? '?'}`);
     // NOTE: no event.preventDefault() here — that would *cancel* the download.
-    // Taking over where the file goes just needs item.setSavePath().
-    const autoSave = process.env.GSP_AUTO_SAVE;
-    const filePath = autoSave || askSavePath(item);
-    if (!filePath) {
-      item.cancel();
-      // eslint-disable-next-line no-console
-      console.log('[desktop] cancelled at dialog');
-      return;
-    }
-    item.setSavePath(filePath);
-    item.once('done', (_e, state) => {
-      // eslint-disable-next-line no-console
-      console.log(`[desktop] done id=${item.id ?? '?'} state=${state} -> ${item.getSavePath()}`);
+    // Also: do NOT open our own dialog.showSaveDialog from the handler and do
+    // not prefill item.setSavePath that we later replace: when the handler
+    // returns with an empty save path, Electron's download manager opens its
+    // OWN save dialog (title = item URL) → the user saw two dialogs per save.
+    // The supported path is setSaveDialogOptions: one dialog Electron itself
+    // shows, using our title + default location; cancelling it cancels the
+    // download (DOWNLOAD_INTERRUPT_REASON_USER_CANCELED) in one step.
+    item.setSaveDialogOptions({
+      title: '保存导出文件',
+      defaultPath: path.join(app.getPath('downloads'), item.getFilename()),
     });
+    item.once('done', (_e, state) => log(`done id=${item.id ?? '?'} state=${state} -> ${item.getSavePath()}`));
   });
 }
 
