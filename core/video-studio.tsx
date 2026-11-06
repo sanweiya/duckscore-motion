@@ -298,6 +298,7 @@ export function VideoStudio(props: VideoStudioProps): any {
   const [exportMessage, setExportMessage] = useState('');
   const [exportError, setExportError] = useState('');
   const [lastExport, setLastExport] = useState<{ name: string; url: string; size: number } | null>(null);
+  const lastExportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const previewSize = useMemo(() => previewFrameSize(props.studio.aspect), [props.studio.aspect]);
   // HiDPI: render the preview backing store with device pixels so the notation
@@ -443,6 +444,7 @@ export function VideoStudio(props: VideoStudioProps): any {
       audioRef.current?.pause();
       const runtime = exportCancelRef.current;
       if (runtime) runtime.cancelled = true;
+      if (lastExportTimerRef.current) clearTimeout(lastExportTimerRef.current);
       if (lastExportUrlRef.current) URL.revokeObjectURL(lastExportUrlRef.current);
     };
   }, []);
@@ -1072,8 +1074,12 @@ export function VideoStudio(props: VideoStudioProps): any {
       downloadBlob(result.blob, name);
       setExportProgress(100);
       setExportMessage(t('export.done'));
+      // The done pill (lastExport) is the notification; a full-width success
+      // toast beside it read as stray translucent bands (user feedback), so no
+      // second toast here. The pill also auto-hides after a while.
       if (withAudio && !result.hasAudio) props.onNotify('info', t('export.audioFailed'));
-      else props.onNotify('success', t('toast.exportDone'));
+      if (lastExportTimerRef.current) clearTimeout(lastExportTimerRef.current);
+      lastExportTimerRef.current = setTimeout(() => setLastExport(null), 12_000);
     } catch (reason) {
       if (runtime.cancelled) {
         props.onNotify('info', t('export.cancelled'));
@@ -1226,9 +1232,19 @@ export function VideoStudio(props: VideoStudioProps): any {
           {exportError && <div className="gsp-vs-error">{exportError}</div>}
           {lastExport && (
             <div className="gsp-vs-result">
-              <span>{t('export.done')}</span>
+              <button
+                type="button"
+                className="gsp-vs-result-close"
+                onClick={() => setLastExport(null)}
+                title={t('common.close')}
+                aria-label={t('common.close')}
+              >
+                <CloseIcon />
+              </button>
               <a className="gsp-btn is-small" href={lastExport.url} download={lastExport.name}>
-                <DownloadIcon /> {lastExport.name} · {(lastExport.size / 1024 / 1024).toFixed(1)} MB
+                <DownloadIcon />
+                <span className="gsp-vs-result-name">{lastExport.name}</span>
+                <span className="gsp-vs-result-size">{(lastExport.size / 1024 / 1024).toFixed(1)} MB</span>
               </a>
             </div>
           )}

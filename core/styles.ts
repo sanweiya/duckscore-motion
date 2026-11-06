@@ -523,11 +523,28 @@ export const CSS = `
   flex: none; padding: 7px 9px; border-radius: 8px; font-size: 10.5px; line-height: 1.45;
   color: #a8303a; background: rgba(168,48,58,.09); border: 1px solid rgba(168,48,58,.22);
 }
+/* Export done pill: compact, centered, same chrome as the transport bar. A
+   full-width translucent band here stacked with the text band looked broken. */
 .gsp-vs-result {
-  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
-  font-size: 10.5px; color: #53677c;
+  flex: none; align-self: center; max-width: min(660px, 96%);
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 5px 8px 5px 5px; border-radius: 10px;
+  font-size: 11px; color: #365d87;
+  background: rgba(250,252,255,.96); border: 1px solid rgba(54,93,135,.18);
+  box-shadow: 0 6px 18px rgba(32,62,94,.12);
 }
-.gsp-vs-result a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.gsp-vs-result-close {
+  appearance: none; border: 0; background: rgba(67,109,157,.10); color: #53677c;
+  width: 22px; height: 22px; border-radius: 50%; flex: none; cursor: pointer;
+  display: grid; place-items: center; padding: 0;
+}
+.gsp-vs-result-close:hover { background: rgba(168,48,58,.14); color: #a8303a; }
+.gsp-vs-result a {
+  max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.gsp-vs-result-name { overflow: hidden; text-overflow: ellipsis; }
+.gsp-vs-result-size { color: #7b8fa3; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .gsp-vs-side {
   flex: 0 0 326px; width: 326px; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: rgba(250,252,255,.96); border-left: 1px solid rgba(54,93,135,.15);
