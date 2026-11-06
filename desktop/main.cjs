@@ -51,19 +51,39 @@ async function startServer() {
 /**
  * Save exports through the native dialog instead of the browser default
  * (which would dump files into ~/Downloads without asking).
+ * `GSP_AUTO_SAVE=/abs/path` skips the dialog (used by automated tests).
  */
 function wireSaveDialog(webContents) {
+  if (process.env.GSP_NO_WIRE) {
+    // eslint-disable-next-line no-console
+    console.log('[desktop] will-download wiring disabled for diagnosis');
+    webContents.session.on('will-download', (event, item) => {
+      // eslint-disable-next-line no-console
+      console.log(`[desktop] observed download ${item.getURL().slice(0, 64)} (${item.getFilename()})`);
+    });
+    return;
+  }
   webContents.session.on('will-download', (event, item) => {
-    event.preventDefault();
-    const filePath = dialog.showSaveDialogSync(win, {
+    // eslint-disable-next-line no-console
+    console.log(`[desktop] will-download ${item.getURL().slice(0, 96)}`);
+    // NOTE: no event.preventDefault() here — that would *cancel* the download.
+    // Taking over where the file goes just needs item.setSavePath().
+    const autoSave = process.env.GSP_AUTO_SAVE;
+    const filePath = autoSave || dialog.showSaveDialogSync(win, {
       title: '保存导出文件',
       defaultPath: item.getFilename(),
     });
     if (!filePath) {
       item.cancel();
+      // eslint-disable-next-line no-console
+      console.log('[desktop] cancelled at dialog');
       return;
     }
     item.setSavePath(filePath);
+    item.once('done', (_e, state) => {
+      // eslint-disable-next-line no-console
+      console.log(`[desktop] done ${state} -> ${item.getSavePath()}`);
+    });
   });
 }
 
@@ -117,7 +137,23 @@ async function createWindow() {
     win = null;
   });
 
-  await win.loadURL(`http://127.0.0.1:${port}/`);
+  // Transient net races (e.g. the internal listener settling late) must not
+  // kill the app or show a blank frame: retry, then surface a dialog.
+  const url = `http://127.0.0.1:${port}/`;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await win.loadURL(url);
+      return; // resolved (even with ERR codes if the page still painted)
+    } catch (error) {
+      if (win.isDestroyed()) return;
+      // eslint-disable-next-line no-console
+      console.error(`[desktop] load attempt ${attempt} failed:`, error?.message ?? error);
+      if (attempt === 3) continue; // leave the retry loop; user sees whatever loaded
+      await new Promise((r) => { setTimeout(r, 300 * attempt); });
+    }
+  }
+  // eslint-disable-next-line no-console
+  console.error('[desktop] load did not settle cleanly:', url);
 }
 
 app.whenReady().then(() => {

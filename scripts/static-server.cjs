@@ -83,7 +83,27 @@ function createStaticHandler(rootArg) {
 
 /** Create an http.Server serving `root` (start listening yourself). */
 function createStaticServer(rootArg) {
-  return http.createServer(createStaticHandler(rootArg));
+  const server = http.createServer(createStaticHandler(rootArg));
+  // A hanging-up client (Chromium likes to preconnect and abort) otherwise
+  // crashes the process on an unhandled `error` event (Node throws when no
+  // listener exists) - observed intermittently right after window startup.
+  server.on('clientError', (err, socket) => {
+    if (socket.writable && headersSent(err) === false) {
+      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    } else {
+      socket.destroy();
+    }
+  });
+  server.on('error', (err) => {
+    console.error('[static-server] error:', err?.message ?? err);
+  });
+  return server;
 }
+
+function headersSent(err) {
+  // A parse error can't have sent headers yet; anything else treat as sent.
+  return !(err instanceof SyntaxError);
+}
+
 
 module.exports = { MIME_TYPES, createStaticHandler, createStaticServer };

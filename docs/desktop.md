@@ -39,6 +39,13 @@ npm run desktop:build  # 构建 dist/ + 打包 Linux 安装器到 release/
 - **窗口即浏览器**：`contextIsolation / sandbox: true`、`nodeIntegration: false`，
   渲染层自足；外部 http(s) 链接交给系统浏览器，不弹新窗口。
 - **导出保存**：`session.on('will-download')` → 原生另存为对话框，取消则丢弃。
+  ⚠️ 两个坑（都踩过）：
+  - `will-download` 里 `event.preventDefault()` 是**取消这次下载**，不是“接管另存为”；
+    接管只需 `item.setSavePath()`（弹窗与否无关），用户取消对话框才调 `item.cancel()`。
+    先 preventDefault 再弹框会表现为“弹了保存窗、点了保存、一个文件都没有”。
+  - 共用的 http server 必须挂 `clientError` / `error` 处理：Chromium 启动时会抢建/弃置
+    连接，未处理的 server `error`（ECONNRESET 一类）会让 Node 以
+    「未处理 error 事件」**直接崩掉主进程**（窗口闪退/白屏），见 `scripts/static-server.cjs`。
 - **数据**：无任何 userData 写入代码，localStorage 三件套自动落在
   `~/.config/Duck Score Motion/`。key 沿用网页版，**改名仍会丢桌面用户设置**。
 - 单实例锁；生产窗口无菜单栏，开发模式 F12/Ctrl+Shift+I 开 DevTools。
