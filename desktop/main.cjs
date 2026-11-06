@@ -14,9 +14,7 @@
 
 const path = require('node:path');
 const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
-const { createStaticServer } = require('../scripts/static-server.cjs');
-
-const appDir = path.resolve(__dirname, '..');
+const { createStaticServer } = require('../scripts/static-server.cjs');const appDir = path.resolve(__dirname, '..');
 const isDev = !app.isPackaged;
 // Works both unpacked and inside the asar: dev → <repo>/dist, packaged →
 // <resources>/app.asar/dist. In asar builds `resourcesPath + '/dist'` would
@@ -28,7 +26,14 @@ let win = null;
 /** @type {import('node:http').Server | null} */
 let server = null;
 
-if (!app.requestSingleInstanceLock()) {
+const log = (...parts) => console.log(`[desktop ${new Date().toISOString()}]`, ...parts);
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  // Another app copy (e.g. the user double-launched, or a leftover instance
+  // still runs): quit cleanly without opening a half-broken window. Electron
+  // would otherwise still fire whenReady, and a window created in that race
+  // "loads" garbage ERR frames - observed in the wild.
+  log('another instance is running; quitting');
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -53,6 +58,23 @@ async function startServer() {
  * (which would dump files into ~/Downloads without asking).
  * `GSP_AUTO_SAVE=/abs/path` skips the dialog (used by automated tests).
  */
+const showSaveDialogSync = dialog.showSaveDialogSync.bind(dialog);
+
+/** Show the native save dialog for a download item (counted + logged). */
+function askSavePath(item) {
+  const seq = askSavePath.seq ??= 0;
+  askSavePath.seq = seq + 1;
+  // eslint-disable-next-line no-console
+  console.log(`[desktop] dialog #${seq + 1} open for item=${item.id ?? '?'}`);
+  const filePath = showSaveDialogSync(win, {
+    title: '保存导出文件',
+    defaultPath: item.getFilename(),
+  });
+  // eslint-disable-next-line no-console
+  console.log(`[desktop] dialog #${seq + 1} -> ${filePath ?? 'cancelled'}`);
+  return filePath;
+}
+
 function wireSaveDialog(webContents) {
   if (process.env.GSP_NO_WIRE) {
     // eslint-disable-next-line no-console
@@ -65,14 +87,11 @@ function wireSaveDialog(webContents) {
   }
   webContents.session.on('will-download', (event, item) => {
     // eslint-disable-next-line no-console
-    console.log(`[desktop] will-download ${item.getURL().slice(0, 96)}`);
+    console.log(`[desktop] will-download url=${item.getURL().slice(0, 96)} id=${item.id ?? '?'}`);
     // NOTE: no event.preventDefault() here — that would *cancel* the download.
     // Taking over where the file goes just needs item.setSavePath().
     const autoSave = process.env.GSP_AUTO_SAVE;
-    const filePath = autoSave || dialog.showSaveDialogSync(win, {
-      title: '保存导出文件',
-      defaultPath: item.getFilename(),
-    });
+    const filePath = autoSave || askSavePath(item);
     if (!filePath) {
       item.cancel();
       // eslint-disable-next-line no-console
@@ -82,7 +101,7 @@ function wireSaveDialog(webContents) {
     item.setSavePath(filePath);
     item.once('done', (_e, state) => {
       // eslint-disable-next-line no-console
-      console.log(`[desktop] done ${state} -> ${item.getSavePath()}`);
+      console.log(`[desktop] done id=${item.id ?? '?'} state=${state} -> ${item.getSavePath()}`);
     });
   });
 }
@@ -157,6 +176,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!gotLock) return;
   createWindow();
   app.on('activate', () => {
     // macOS convention: clicking the dock icon recreates the window.
